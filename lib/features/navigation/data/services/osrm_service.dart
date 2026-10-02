@@ -1,11 +1,16 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:http/http.dart' as http;
 
+import '../../../../core/errors/routing_errors.dart';
 import '../models/osrm_response.dart';
 
 /// Makes raw HTTP calls to the OSRM routing API.
 ///
 /// Knows about HTTP and JSON only — no business logic.
-/// The [RoutingRepository] calls this and converts the response to a [RouteModel].
+/// [RoutingRepository] calls this and converts the response to a [RouteModel].
 class OsrmService {
   OsrmService({
     required this.baseUrl,
@@ -15,27 +20,65 @@ class OsrmService {
   final String baseUrl;
   final http.Client _client;
 
-  // ignore: unused_field — used in Phase 5 implementation
   static const Duration _timeout = Duration(seconds: 10);
 
-  /// Fetches a driving route between [origin] and [destination].
+  /// Fetches a driving route between origin and destination.
   ///
-  /// Coordinates must be [LatLng]-style (lat, lng) but are sent to OSRM
-  /// as lng,lat (OSRM uses GeoJSON coordinate order).
+  /// OSRM uses GeoJSON coordinate order: longitude, latitude.
   ///
-  /// Throws typed [AppError] subclasses on failure.
+  /// Throws typed [AppError] subclasses on failure:
+  ///   - [RoutingNetworkError] — socket / DNS failure
+  ///   - [RoutingTimeout]      — response took > 10 s
+  ///   - [RoutingParseError]   — malformed JSON
+  ///   - [NoRouteFound]        — empty routes array or non-Ok code
   Future<OsrmResponse> fetchRoute({
     required double originLat,
     required double originLng,
     required double destLat,
     required double destLng,
   }) async {
-    // TODO(phase5): implement — stub compiles cleanly
-    throw UnimplementedError('Implemented in Phase 5');
+    final uri = buildRouteUri(
+      originLat: originLat,
+      originLng: originLng,
+      destLat: destLat,
+      destLng: destLng,
+    );
+
+    final http.Response response;
+    try {
+      response = await _client.get(uri).timeout(_timeout);
+    } on SocketException catch (e) {
+      throw RoutingNetworkError(e.message);
+    } on HttpException catch (e) {
+      throw RoutingNetworkError(e.message);
+    } on TimeoutException {
+      throw const RoutingTimeout();
+    } catch (e) {
+      throw RoutingNetworkError(e.toString());
+    }
+
+    if (response.statusCode != 200) {
+      throw RoutingNetworkError(
+          'HTTP ${response.statusCode}');
+    }
+
+    final Map<String, dynamic> json;
+    try {
+      json = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw const RoutingParseError('Invalid JSON response');
+    }
+
+    final osrmResponse = OsrmResponse.fromJson(json);
+    if (!osrmResponse.isOk || osrmResponse.routes.isEmpty) {
+      throw const NoRouteFound();
+    }
+
+    return osrmResponse;
   }
 
   /// Builds the OSRM route URL.
-  /// Visible for testing.
+  /// Visible for testing — no HTTP side effects.
   Uri buildRouteUri({
     required double originLat,
     required double originLng,

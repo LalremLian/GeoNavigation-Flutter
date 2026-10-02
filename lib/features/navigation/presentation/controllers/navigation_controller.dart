@@ -218,6 +218,36 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
     );
   }
 
+  /// Fits the map camera to show the full route with padding.
+  void _fitRouteBounds(RouteModel r) {
+    if (_mapController == null || r.points.isEmpty) return;
+
+    // Compute bounding box of all route points
+    double minLat = r.points.first.latitude;
+    double maxLat = r.points.first.latitude;
+    double minLng = r.points.first.longitude;
+    double maxLng = r.points.first.longitude;
+
+    for (final pt in r.points) {
+      if (pt.latitude < minLat) minLat = pt.latitude;
+      if (pt.latitude > maxLat) maxLat = pt.latitude;
+      if (pt.longitude < minLng) minLng = pt.longitude;
+      if (pt.longitude > maxLng) maxLng = pt.longitude;
+    }
+
+    final bounds = LatLngBounds(
+      LatLng(minLat, minLng),
+      LatLng(maxLat, maxLng),
+    );
+
+    _mapController!.fitCamera(
+      CameraFit.bounds(
+        bounds: bounds,
+        padding: const EdgeInsets.all(60),
+      ),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Destination & routing
   // ---------------------------------------------------------------------------
@@ -284,6 +314,7 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
       route.value = result;
       isLoadingRoute.value = false;
       navStatus.value = NavigationStatus.ready;
+      _fitRouteBounds(result);
     } catch (e) {
       if (isClosed || myVersion != _routeRequestVersion) return;
 
