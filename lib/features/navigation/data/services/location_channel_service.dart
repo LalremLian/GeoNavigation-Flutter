@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 import '../../../../core/constants/channel_constants.dart';
@@ -6,84 +8,155 @@ import '../../domain/entities/location_data.dart';
 
 /// Low-level bridge between Dart and the native Android location channels.
 ///
-/// This is the ONLY class that directly touches [MethodChannel] or
-/// [EventChannel] for location. Everything above this layer uses
-/// [LocationService] which wraps this class.
+/// This is the ONLY class in the codebase that directly references
+/// [MethodChannel] or [EventChannel] for location data.
+/// Every call above this layer goes through [LocationService].
 ///
-/// Implemented in Phase 2 — stub exists so imports compile.
+/// Platform contract (must match LocationChannel.kt exactly):
+///   MethodChannel : com.example.navtest/location
+///   EventChannel  : com.example.navtest/location_stream
+///
+/// On unsupported platforms (iOS not yet implemented, web, desktop)
+/// every method returns a [LocationNotSupported] error rather than crashing.
 class LocationChannelService {
   LocationChannelService()
       : _methodChannel = const MethodChannel(ChannelConstants.locationMethod),
         _eventChannel = const EventChannel(ChannelConstants.locationStream);
 
-  // ignore: unused_field — used in Phase 2 implementation
   final MethodChannel _methodChannel;
-  // ignore: unused_field — used in Phase 2 implementation
   final EventChannel _eventChannel;
 
   // ---------------------------------------------------------------------------
-  // One-shot commands via MethodChannel
+  // Permission
   // ---------------------------------------------------------------------------
 
-  /// Asks Android to show the permission rationale dialog if needed,
-  /// then request ACCESS_FINE_LOCATION.
+  /// Triggers the OS permission dialog for ACCESS_FINE_LOCATION.
   ///
-  /// Throws a typed [AppError] on denial.
+  /// Completes normally if granted.
+  /// Throws [LocationPermissionDenied] or [LocationPermissionPermanentlyDenied].
   Future<void> requestPermission() async {
-    // TODO(phase2): implement
-    throw UnimplementedError('Implemented in Phase 2');
+    try {
+      await _methodChannel.invokeMethod<String>('requestPermission');
+      // Any non-exception return means granted
+    } on PlatformException catch (e) {
+      _throwMapped(e);
+    } on MissingPluginException {
+      throw const LocationNotSupported();
+    }
   }
 
   /// Returns true if ACCESS_FINE_LOCATION is currently granted.
   Future<bool> hasPermission() async {
-    // TODO(phase2): implement
-    throw UnimplementedError('Implemented in Phase 2');
+    try {
+      final result = await _methodChannel.invokeMethod<String>('checkPermission');
+      return result == 'granted';
+    } on PlatformException catch (e) {
+      _throwMapped(e);
+    } on MissingPluginException {
+      throw const LocationNotSupported();
+    }
   }
 
-  /// Returns true if the device GPS / network provider is enabled.
+  /// Returns true if the device GPS / network location provider is on.
   Future<bool> isLocationServiceEnabled() async {
-    // TODO(phase2): implement
-    throw UnimplementedError('Implemented in Phase 2');
-  }
-
-  /// Requests a single, fresh location fix with a native timeout.
-  ///
-  /// Throws [LocationTimeout] if no fix arrives in time.
-  Future<LocationData> getCurrentLocation() async {
-    // TODO(phase2): implement
-    throw UnimplementedError('Implemented in Phase 2');
-  }
-
-  /// Opens the system app-settings screen so the user can grant
-  /// permanently-denied permissions.
-  Future<void> openAppSettings() async {
-    // TODO(phase2): implement
-    throw UnimplementedError('Implemented in Phase 2');
+    try {
+      final result =
+          await _methodChannel.invokeMethod<bool>('isLocationServiceEnabled');
+      return result ?? false;
+    } on PlatformException catch (e) {
+      _throwMapped(e);
+    } on MissingPluginException {
+      throw const LocationNotSupported();
+    }
   }
 
   // ---------------------------------------------------------------------------
-  // Continuous stream via EventChannel
+  // Single fix
+  // ---------------------------------------------------------------------------
+
+  /// Requests a fresh location fix from the native side.
+  ///
+  /// Throws a typed [AppError] on any failure.
+  Future<LocationData> getCurrentLocation() async {
+    try {
+      final raw = await _methodChannel
+          .invokeMapMethod<Object?, Object?>('getCurrentLocation');
+      if (raw == null) throw const LocationUnavailable('No data returned');
+      return _mapToLocationData(raw);
+    } on PlatformException catch (e) {
+      _throwMapped(e);
+    } on MissingPluginException {
+      throw const LocationNotSupported();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Settings
+  // ---------------------------------------------------------------------------
+
+  /// Opens the system app-settings screen so the user can re-enable
+  /// a permanently-denied permission.
+  Future<void> openAppSettings() async {
+    try {
+      await _methodChannel.invokeMethod<void>('openAppSettings');
+    } on PlatformException catch (e) {
+      _throwMapped(e);
+    } on MissingPluginException {
+      throw const LocationNotSupported();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Continuous stream
   // ---------------------------------------------------------------------------
 
   /// Returns a broadcast stream of location updates.
   ///
-  /// The native side starts FusedLocation updates when the first listener
-  /// subscribes and stops them when the last listener cancels.
+  /// The native side starts [FusedLocationProviderClient] updates when the
+  /// first subscriber listens and stops them when the subscription is cancelled.
+  ///
+  /// Emits typed [AppError] subclasses via [addError] on failure — callers
+  /// can distinguish them with an `onError` handler or `.handleError()`.
   Stream<LocationData> locationStream() {
-    // TODO(phase2): implement
-    return const Stream.empty();
+    return _eventChannel
+        .receiveBroadcastStream()
+        .map((event) {
+          // EventChannel delivers a Map<Object?, Object?> from Kotlin
+          final raw = Map<Object?, Object?>.from(event as Map);
+          return _mapToLocationData(raw);
+        })
+        .handleError((Object error) {
+          if (error is PlatformException) {
+            // Re-throw as a typed Dart error so callers don't see raw strings
+            throw locationErrorFromCode(error.code, error.message);
+          }
+          throw error; // unknown — rethrow as-is
+        });
   }
 
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
 
-  /// Converts a raw channel map from the native side into a [LocationData].
-  /// Exposed for testing.
-  static LocationData mapToLocationData(Map<Object?, Object?> raw) {
+  /// Converts a raw channel map into a [LocationData] value object.
+  ///
+  /// Exposed as a static method so it can be used in unit tests without
+  /// spinning up a real channel.
+  static LocationData mapToLocationData(Map<Object?, Object?> raw) =>
+      _mapToLocationData(raw);
+
+  static LocationData _mapToLocationData(Map<Object?, Object?> raw) {
+    // Guard against unexpected null values from the native side
+    final lat = (raw['lat'] as num?)?.toDouble();
+    final lng = (raw['lng'] as num?)?.toDouble();
+
+    if (lat == null || lng == null) {
+      throw const LocationUnavailable('Received null coordinates from native');
+    }
+
     return LocationData(
-      latitude: (raw['lat'] as num).toDouble(),
-      longitude: (raw['lng'] as num).toDouble(),
+      latitude: lat,
+      longitude: lng,
       accuracy: (raw['accuracy'] as num?)?.toDouble(),
       speed: (raw['speed'] as num?)?.toDouble(),
       bearing: (raw['bearing'] as num?)?.toDouble(),
@@ -93,8 +166,8 @@ class LocationChannelService {
     );
   }
 
-  /// Maps a [PlatformException] code to a typed location error and rethrows.
-  static Never throwMapped(PlatformException e) {
+  /// Converts a [PlatformException] to a typed location error and throws it.
+  static Never _throwMapped(PlatformException e) {
     throw locationErrorFromCode(e.code, e.message);
   }
 }
