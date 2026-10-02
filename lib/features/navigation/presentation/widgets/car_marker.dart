@@ -10,7 +10,12 @@ import '../controllers/navigation_controller.dart';
 /// Renders the animated car icon on the map.
 ///
 /// Reads [NavigationController.engineState] and rotates/positions the icon
-/// according to bearing and position. No navigation math lives here.
+/// according to bearing and position. No navigation mathematics lives here —
+/// all computation is done in [NavigationEngine].
+///
+/// The car is shown:
+///   - At the route start point once a route is ready (before Start is pressed)
+///   - While navigating, paused, or completed
 class CarMarker extends StatelessWidget {
   const CarMarker({super.key});
 
@@ -22,9 +27,10 @@ class CarMarker extends StatelessWidget {
       final state = controller.engineState.value;
       if (state == null) return const SizedBox.shrink();
 
-      // Don't show the car until navigation has started
+      // Show car at start point when ready, and during/after navigation
       final status = controller.navStatus.value;
-      final showCar = status == NavigationStatus.navigating ||
+      final showCar = status == NavigationStatus.ready ||
+          status == NavigationStatus.navigating ||
           status == NavigationStatus.paused ||
           status == NavigationStatus.completed;
       if (!showCar) return const SizedBox.shrink();
@@ -33,19 +39,50 @@ class CarMarker extends StatelessWidget {
         markers: [
           Marker(
             point: state.position,
-            width: 36,
-            height: 36,
-            child: Transform.rotate(
-              angle: state.bearingDegrees * math.pi / 180,
-              child: const Icon(
-                Icons.navigation,
-                color: Colors.deepOrange,
-                size: 36,
-              ),
-            ),
+            width: 44,
+            height: 44,
+            child: _CarIcon(bearingDegrees: state.bearingDegrees),
           ),
         ],
       );
     });
+  }
+}
+
+/// Navigation arrow icon with a circular background.
+///
+/// Rotated by [bearingDegrees] so it points in the direction of travel.
+/// [Transform.rotate] uses radians, clockwise positive, matching
+/// the 0°=north / 90°=east bearing convention.
+class _CarIcon extends StatelessWidget {
+  const _CarIcon({required this.bearingDegrees});
+
+  final double bearingDegrees;
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.rotate(
+      angle: bearingDegrees * math.pi / 180,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: const BoxDecoration(
+          color: Colors.deepOrange,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black38,
+              blurRadius: 6,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: const Icon(
+          Icons.navigation,
+          color: Colors.white,
+          size: 26,
+        ),
+      ),
+    );
   }
 }

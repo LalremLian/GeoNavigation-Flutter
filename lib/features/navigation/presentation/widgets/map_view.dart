@@ -55,10 +55,21 @@ class _MapViewState extends State<MapView> {
           _navController.onMapLongPress(point);
         },
         onMapEvent: (event) {
-          // Phase 9: detect user-initiated pan/zoom to stop camera following
-          if (event is MapEventMoveStart &&
-              event.source == MapEventSource.dragStart) {
-            _navController.onUserMapGesture();
+          // Detect any user-initiated map movement and stop camera following.
+          // We check for gesture sources — anything that is NOT a programmatic
+          // move from the MapController, fitCamera, or size changes.
+          if (event is MapEventMove) {
+            switch (event.source) {
+              case MapEventSource.mapController:
+              case MapEventSource.fitCamera:
+              case MapEventSource.nonRotatedSizeChange:
+              case MapEventSource.interactiveFlagsChanged:
+                // Programmatic — do not interrupt camera following
+                break;
+              default:
+                // User gesture (drag, fling, pinch, scroll wheel, etc.)
+                _navController.onUserMapGesture();
+            }
           }
         },
       ),
