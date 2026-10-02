@@ -11,12 +11,12 @@ import 'route_layer.dart';
 ///
 /// Rendering responsibilities:
 ///   - OSM tile layer with correct attribution
-///   - Current location marker
-///   - Destination marker
+///   - Current location marker (blue dot)
+///   - Destination marker (red pin)
 ///   - Route polyline (via [RouteLayer])
 ///   - Animated car marker (via [CarMarker])
 ///   - Long-press → destination selection
-///   - Map gesture detection → camera unfollow
+///   - Map gesture detection → camera unfollow (Phase 9)
 ///
 /// No routing, interpolation or bearing mathematics live here.
 class MapView extends StatefulWidget {
@@ -34,7 +34,8 @@ class _MapViewState extends State<MapView> {
   void initState() {
     super.initState();
     _navController = Get.find<NavigationController>();
-    // TODO(phase9): pass _mapController to NavigationController
+    // Inject the MapController so the NavigationController can move the camera
+    _navController.attachMapController(_mapController);
   }
 
   @override
@@ -49,41 +50,59 @@ class _MapViewState extends State<MapView> {
       mapController: _mapController,
       options: MapOptions(
         initialCenter: const LatLng(0, 0),
-        initialZoom: 13,
+        initialZoom: 2, // world view until GPS fix arrives
         onLongPress: (tapPosition, point) {
           _navController.onMapLongPress(point);
         },
         onMapEvent: (event) {
-          // TODO(phase9): detect gesture-initiated moves
+          // Phase 9: detect user-initiated pan/zoom to stop camera following
+          if (event is MapEventMoveStart &&
+              event.source == MapEventSource.dragStart) {
+            _navController.onUserMapGesture();
+          }
         },
       ),
       children: [
-        // OSM tile layer
+        // ---------------------------------------------------------------
+        // OSM tile layer — attribution required by OSM tile usage policy
+        // ---------------------------------------------------------------
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.example.navtest',
+          maxZoom: 19,
         ),
 
+        // ---------------------------------------------------------------
         // Route polyline
+        // ---------------------------------------------------------------
         const RouteLayer(),
 
-        // Markers: current location, destination, car
+        // ---------------------------------------------------------------
+        // Location + destination markers
+        // ---------------------------------------------------------------
         Obx(() {
           final markers = <Marker>[];
 
-          // Current location blue dot
+          // Current location — blue pulsing dot style
           final loc = _navController.currentLocation.value;
           if (loc != null) {
             markers.add(
               Marker(
                 point: LatLng(loc.latitude, loc.longitude),
-                width: 20,
-                height: 20,
+                width: 22,
+                height: 22,
                 child: Container(
                   decoration: BoxDecoration(
                     color: Colors.blue,
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
+                    border: Border.all(color: Colors.white, width: 3),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Colors.blue,
+                        blurRadius: 8,
+                        spreadRadius: 2,
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -96,13 +115,13 @@ class _MapViewState extends State<MapView> {
             markers.add(
               Marker(
                 point: dest,
-                width: 32,
-                height: 40,
+                width: 36,
+                height: 44,
                 alignment: Alignment.topCenter,
                 child: const Icon(
                   Icons.location_pin,
                   color: Colors.red,
-                  size: 36,
+                  size: 40,
                 ),
               ),
             );
@@ -111,15 +130,46 @@ class _MapViewState extends State<MapView> {
           return MarkerLayer(markers: markers);
         }),
 
+        // ---------------------------------------------------------------
         // Animated car
+        // ---------------------------------------------------------------
         const CarMarker(),
 
+        // ---------------------------------------------------------------
         // OSM attribution — required by OSM tile usage policy
+        // ---------------------------------------------------------------
         const RichAttributionWidget(
           attributions: [
             TextSourceAttribution('© OpenStreetMap contributors'),
           ],
         ),
+
+        // ---------------------------------------------------------------
+        // Long-press hint — shown until the first destination is set
+        // ---------------------------------------------------------------
+        Obx(() {
+          final hasDest = _navController.destination.value != null;
+          final hasLocation = _navController.currentLocation.value != null;
+          if (hasDest || !hasLocation) return const SizedBox.shrink();
+          return Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 160),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Text(
+                  'Long-press on the map to set a destination',
+                  style: TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ),
+            ),
+          );
+        }),
       ],
     );
   }

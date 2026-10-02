@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:get/get.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../../core/errors/app_error.dart';
+import '../../../../core/errors/location_errors.dart';
 import '../../data/models/route_model.dart';
 import '../../data/repositories/routing_repository.dart';
 import '../../domain/entities/engine_state.dart';
@@ -46,6 +50,19 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
   Duration _lastTickTime = Duration.zero;
 
   // ---------------------------------------------------------------------------
+  // Location stream
+  // ---------------------------------------------------------------------------
+
+  StreamSubscription<LocationData>? _locationSubscription;
+
+  // ---------------------------------------------------------------------------
+  // Map controller (injected from MapView in Phase 3)
+  // ---------------------------------------------------------------------------
+
+  MapController? _mapController;
+  bool _hasCenteredOnLocation = false;
+
+  // ---------------------------------------------------------------------------
   // Observable state
   // ---------------------------------------------------------------------------
 
@@ -63,7 +80,6 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
   // Stale-request protection
   // ---------------------------------------------------------------------------
 
-  // ignore: prefer_final_fields, unused_field — mutated in Phase 5
   int _routeRequestVersion = 0;
 
   // ---------------------------------------------------------------------------
@@ -80,6 +96,8 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
   @override
   void onClose() {
     WidgetsBinding.instance.removeObserver(this);
+    _locationSubscription?.cancel();
+    _locationSubscription = null;
     _ticker?.dispose();
     _ticker = null;
     _locationService.dispose();
@@ -93,24 +111,190 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
   }
 
   // ---------------------------------------------------------------------------
+  // Map controller injection
+  // ---------------------------------------------------------------------------
+
+  /// Called once from [MapView.initState] so the controller can move
+  /// the camera programmatically.
+  void attachMapController(MapController mapController) {
+    _mapController = mapController;
+  }
+
+  // ---------------------------------------------------------------------------
   // Location initialisation
   // ---------------------------------------------------------------------------
 
   Future<void> _initLocation() async {
-    // TODO(phase3): implement
+    if (isClosed) return;
+    navStatus.value = NavigationStatus.loadingLocation;
+    error.value = null;
+
+    try {
+      // 1. Request permission — throws typed error if denied
+      await _locationService.requestPermission();
+
+      // 2. Check GPS is on
+      final serviceEnabled = await _locationService.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (!isClosed) {
+          error.value = const LocationServicesDisabled();
+          navStatus.value = NavigationStatus.idle;
+        }
+        return;
+      }
+
+      // 3. Get the first fix to centre the map
+      final firstFix = await _locationService.getCurrentLocation();
+      if (isClosed) return;
+
+      currentLocation.value = firstFix;
+      navStatus.value = NavigationStatus.idle;
+
+      // Centre map on first fix (only once)
+      _centerMapOnLocation(firstFix, zoom: 15);
+
+      // 4. Subscribe to continuous updates
+      _startLocationStream();
+    } on LocationPermissionDenied {
+      if (!isClosed) {
+        error.value = const LocationPermissionDenied();
+        navStatus.value = NavigationStatus.idle;
+      }
+    } on LocationPermissionPermanentlyDenied {
+      if (!isClosed) {
+        error.value = const LocationPermissionPermanentlyDenied();
+        navStatus.value = NavigationStatus.idle;
+      }
+    } on LocationServicesDisabled {
+      if (!isClosed) {
+        error.value = const LocationServicesDisabled();
+        navStatus.value = NavigationStatus.idle;
+      }
+    } on LocationNotSupported {
+      if (!isClosed) {
+        error.value = const LocationNotSupported();
+        navStatus.value = NavigationStatus.idle;
+      }
+    } catch (e) {
+      if (!isClosed) {
+        error.value = LocationUnavailable(e.toString());
+        navStatus.value = NavigationStatus.idle;
+      }
+    }
+  }
+
+  void _startLocationStream() {
+    // Cancel any existing subscription before creating a new one
+    _locationSubscription?.cancel();
+
+    _locationSubscription = _locationService
+        .locationStream()
+        .listen(
+      (fix) {
+        if (isClosed) return;
+        currentLocation.value = fix;
+
+        // Centre map on first stream fix if we haven't yet
+        if (!_hasCenteredOnLocation) {
+          _centerMapOnLocation(fix, zoom: 15);
+        }
+      },
+      onError: (Object e) {
+        if (isClosed) return;
+        if (e is AppError) {
+          error.value = e;
+        }
+        // Don't crash on stream errors — just surface them
+      },
+      cancelOnError: false, // keep listening even after a transient error
+    );
+  }
+
+  void _centerMapOnLocation(LocationData fix, {double zoom = 15}) {
+    _hasCenteredOnLocation = true;
+    _mapController?.move(
+      LatLng(fix.latitude, fix.longitude),
+      zoom,
+    );
   }
 
   // ---------------------------------------------------------------------------
   // Destination & routing
   // ---------------------------------------------------------------------------
 
+  /// Called when the user long-presses the map.
+  ///
+  /// Sets the new destination immediately so the pin appears at once,
+  /// resets any in-progress navigation, and starts a new route request.
+  /// Any previous in-flight route request is invalidated by incrementing
+  /// [_routeRequestVersion] — if the response arrives late it is discarded.
   void onMapLongPress(LatLng tappedPoint) {
-    // TODO(phase4): implement
+    if (isClosed) return;
+
+    // Cancel any active navigation so the old route is cleared
+    _stopTicker();
+
+    // Update destination state immediately — pin shows right away
+    destination.value = tappedPoint;
+
+    // Clear old route + engine state
+    route.value = null;
+    engineState.value = null;
+    navStatus.value = NavigationStatus.idle;
+    error.value = null;
+
+    // Guard: need a current location to calculate a route from
+    final loc = currentLocation.value;
+    if (loc == null) {
+      // No location yet — destination pin is set, route will be fetched
+      // automatically once location arrives (Phase 5 handles this)
+      return;
+    }
+
+    _fetchRoute(tappedPoint);
   }
 
-  // ignore: unused_element — implemented in Phase 5
   Future<void> _fetchRoute(LatLng dest) async {
-    // TODO(phase5): implement
+    if (isClosed) return;
+
+    // Increment version — any older in-flight request will see a mismatch
+    // and discard its result
+    final myVersion = ++_routeRequestVersion;
+
+    isLoadingRoute.value = true;
+    navStatus.value = NavigationStatus.loadingRoute;
+    error.value = null;
+
+    try {
+      final origin = currentLocation.value;
+      if (origin == null) {
+        isLoadingRoute.value = false;
+        navStatus.value = NavigationStatus.idle;
+        return;
+      }
+
+      final result = await _routingRepository.getRoute(
+        origin: LatLng(origin.latitude, origin.longitude),
+        destination: dest,
+      );
+
+      // Stale-request guard — discard if a newer request has started
+      if (isClosed || myVersion != _routeRequestVersion) return;
+
+      route.value = result;
+      isLoadingRoute.value = false;
+      navStatus.value = NavigationStatus.ready;
+    } catch (e) {
+      if (isClosed || myVersion != _routeRequestVersion) return;
+
+      isLoadingRoute.value = false;
+      navStatus.value = NavigationStatus.idle;
+      if (e is AppError) {
+        error.value = e;
+      }
+      // Non-AppError exceptions (network, etc.) are silently ignored here;
+      // RoutingRepository maps them to typed errors in Phase 5.
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -176,5 +360,20 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
   void initTicker(TickerProvider vsync) {
     if (_ticker != null) return; // guard against double-init
     _ticker = vsync.createTicker(_onTick);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Public helpers
+  // ---------------------------------------------------------------------------
+
+  /// Opens system app settings so the user can re-enable a
+  /// permanently-denied location permission.
+  Future<void> openAppSettings() => _locationService.openAppSettings();
+
+  /// Dismisses the current error and retries location initialisation.
+  void retryLocation() {
+    error.value = null;
+    _hasCenteredOnLocation = false;
+    _initLocation();
   }
 }
