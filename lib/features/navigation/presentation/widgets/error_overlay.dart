@@ -117,9 +117,9 @@ class ErrorOverlay extends StatelessWidget {
       LocationServicesDisabled() => _ErrorContent(
           icon: Icons.gps_off,
           title: 'GPS is disabled',
-          message: 'Enable location services in device settings, then tap retry.',
-          actionLabel: 'Retry',
-          onAction: controller.retryLocation,
+          message: 'Enable location services in device settings to continue navigation.',
+          actionLabel: 'Turn on GPS',
+          onAction: controller.openLocationSettings,
         ),
       LocationTimeout() => _ErrorContent(
           icon: Icons.timer_off,

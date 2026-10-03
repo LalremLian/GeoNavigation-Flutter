@@ -162,6 +162,19 @@ class LocationChannel(
             }
 
             // -----------------------------------------------------------------
+            "openLocationSettings" -> {
+                val activity = getActivity() ?: run {
+                    result.error(ErrorCodes.NOT_SUPPORTED, "No activity", null)
+                    return
+                }
+                val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                activity.startActivity(intent)
+                result.success(null)
+            }
+
+            // -----------------------------------------------------------------
             else -> result.notImplemented()
         }
     }

@@ -1,7 +1,10 @@
 package com.example.navtest.location
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.location.LocationManager as SystemLocationManager
 import android.os.Looper
@@ -17,6 +20,7 @@ import com.google.android.gms.tasks.CancellationTokenSource
  *  - Single location fix with timeout via getCurrentLocation()
  *  - Continuous location updates via startLocationUpdates() / stopLocationUpdates()
  *  - Location service (GPS) enabled check
+ *  - Real-time provider changes monitoring via BroadcastReceiver
  *
  * All callbacks fire on the main thread. The channel layer converts results
  * to Flutter-compatible maps before forwarding to Dart.
@@ -28,6 +32,9 @@ class LocationManager(private val context: Context) {
 
     // Holds the active stream callback so we can remove it cleanly.
     private var streamCallback: LocationCallback? = null
+
+    // BroadcastReceiver for provider status (GPS toggle) changes
+    private var providerChangedReceiver: BroadcastReceiver? = null
 
     // CancellationTokenSource for the one-shot getCurrentLocation request.
     private var currentLocationCts: CancellationTokenSource? = null
@@ -177,6 +184,22 @@ class LocationManager(private val context: Context) {
         }
         streamCallback = callback
 
+        // Listen for system GPS/location toggle events immediately
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == SystemLocationManager.PROVIDERS_CHANGED_ACTION) {
+                    if (!isLocationServiceEnabled()) {
+                        onError(ErrorCodes.LOCATION_SERVICE_DISABLED)
+                    }
+                }
+            }
+        }
+        providerChangedReceiver = receiver
+        context.registerReceiver(
+            receiver,
+            IntentFilter(SystemLocationManager.PROVIDERS_CHANGED_ACTION)
+        )
+
         fusedClient.requestLocationUpdates(
             request,
             callback,
@@ -188,6 +211,12 @@ class LocationManager(private val context: Context) {
 
     /** Stops any active continuous location updates. Safe to call repeatedly. */
     fun stopLocationUpdates() {
+        providerChangedReceiver?.let {
+            try {
+                context.unregisterReceiver(it)
+            } catch (_: Exception) {}
+            providerChangedReceiver = null
+        }
         streamCallback?.let {
             fusedClient.removeLocationUpdates(it)
             streamCallback = null

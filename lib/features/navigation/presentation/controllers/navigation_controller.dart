@@ -138,14 +138,40 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
         if (_tickerRunning) _stopTicker();
         break;
       case AppLifecycleState.resumed:
-        // Resume animation if we were navigating before backgrounding
-        if (navStatus.value == NavigationStatus.navigating && !_tickerRunning) {
-          _startTicker();
-        }
+        _onAppResumed();
         break;
       case AppLifecycleState.inactive:
         break;
     }
+  }
+
+  Future<void> _onAppResumed() async {
+    // Check if location services or permissions changed while app was in background / settings
+    try {
+      final enabled = await _locationService.isLocationServiceEnabled();
+      if (!enabled) {
+        if (!isClosed) {
+          error.value = const LocationServicesDisabled();
+          if (navStatus.value == NavigationStatus.navigating) {
+            pause();
+          }
+        }
+        return;
+      }
+
+      // If location was enabled and we previously had LocationServicesDisabled error, clear it
+      if (error.value is LocationServicesDisabled) {
+        error.value = null;
+        if (currentLocation.value == null) {
+          _initLocation(promptUserIfNeeded: false);
+        }
+      }
+
+      // Resume animation if we were navigating before backgrounding
+      if (navStatus.value == NavigationStatus.navigating && !_tickerRunning) {
+        _startTicker();
+      }
+    } catch (_) {}
   }
 
   // ---------------------------------------------------------------------------
@@ -271,12 +297,23 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
         currentLocation.value = fix;
         // A valid stream fix means any earlier transient availability error
         // is no longer actionable.
-        error.value = null;
+        if (error.value is LocationServicesDisabled ||
+            error.value is LocationUnavailable ||
+            error.value is LocationTimeout) {
+          error.value = null;
+        }
         if (!_hasCenteredOnLocation) _centerMapOnLocation(fix, zoom: 15);
       },
       onError: (Object e) {
         if (isClosed) return;
-        if (e is AppError) error.value = e;
+        if (e is AppError) {
+          error.value = e;
+          // If location is disabled during navigation, pause routing animation
+          if (e is LocationServicesDisabled &&
+              navStatus.value == NavigationStatus.navigating) {
+            pause();
+          }
+        }
       },
       cancelOnError: false,
     );
@@ -546,6 +583,8 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
   // ---------------------------------------------------------------------------
 
   Future<void> openAppSettings() => _locationService.openAppSettings();
+
+  Future<void> openLocationSettings() => _locationService.openLocationSettings();
 
   void dismissArrivalDialog() {
     showArrivalDialog.value = false;

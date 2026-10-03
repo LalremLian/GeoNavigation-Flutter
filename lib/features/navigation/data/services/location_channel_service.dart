@@ -106,6 +106,17 @@ class LocationChannelService {
     }
   }
 
+  /// Opens the system Location settings screen so the user can turn on GPS.
+  Future<void> openLocationSettings() async {
+    try {
+      await _methodChannel.invokeMethod<void>('openLocationSettings');
+    } on PlatformException catch (e) {
+      _throwMapped(e);
+    } on MissingPluginException {
+      throw const LocationNotSupported();
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Continuous stream
   // ---------------------------------------------------------------------------

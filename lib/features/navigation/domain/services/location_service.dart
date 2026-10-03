@@ -58,6 +58,9 @@ class LocationService {
   /// permanently-denied permissions.
   Future<void> openAppSettings() => _channel.openAppSettings();
 
+  /// Opens the system Location settings screen so the user can enable GPS.
+  Future<void> openLocationSettings() => _channel.openLocationSettings();
+
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
