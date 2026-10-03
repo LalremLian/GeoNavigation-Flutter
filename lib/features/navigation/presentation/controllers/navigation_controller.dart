@@ -92,12 +92,16 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
   Timer? _routeDebounceTimer;
 
   // ---------------------------------------------------------------------------
-  // Visual bearing interpolation (shortest-angular path accumulation)
+  // Visual & camera bearing interpolation (shortest-angular path accumulation)
   // ---------------------------------------------------------------------------
 
-  /// The continuous visual bearing in degrees.
-  /// Does not jump at 0/360 wrap-around; accumulates delta using [BearingUtils.shortestDelta].
+  /// The continuous visual bearing for the car icon in degrees.
   final RxDouble visualBearingDegrees = 0.0.obs;
+
+  /// Dedicated smoothed bearing for the map camera.
+  /// Uses gentle exponential damping so the map rotates smoothly and cinema-like
+  /// without jerky turns.
+  double _cameraBearingDegrees = 0.0;
 
   // ---------------------------------------------------------------------------
   // Lifecycle
@@ -375,6 +379,7 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
       final initialState = _engine.advance(Duration.zero);
       engineState.value = initialState;
       visualBearingDegrees.value = initialState.bearingDegrees;
+      _cameraBearingDegrees = initialState.bearingDegrees;
     } catch (e) {
       if (isClosed || myVersion != _routeRequestVersion) return;
       isLoadingRoute.value = false;
@@ -397,6 +402,7 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
     }
     navStatus.value = NavigationStatus.navigating;
     cameraFollowing.value = true;
+    _cameraBearingDegrees = visualBearingDegrees.value;
     _startTicker();
   }
 
@@ -424,8 +430,10 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
       final resetState = _engine.advance(Duration.zero);
       engineState.value = resetState;
       visualBearingDegrees.value = resetState.bearingDegrees;
+      _cameraBearingDegrees = 0.0;
       navStatus.value = NavigationStatus.ready;
       cameraFollowing.value = true;
+      _mapController?.rotate(0);
       _fitRouteBounds(currentRoute);
     }
   }
@@ -450,7 +458,9 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
     cameraFollowing.value = true;
     final state = engineState.value;
     if (state != null) {
+      _cameraBearingDegrees = visualBearingDegrees.value;
       _mapController?.move(state.position, 16);
+      _mapController?.rotate(-_cameraBearingDegrees);
     }
   }
 
@@ -495,22 +505,32 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
     final state = _engine.advance(delta);
     engineState.value = state;
 
-    // Smoothly interpolate visual bearing along the shortest angular path:
-    // deltaSec controls rotational speed (e.g. 10 radians/sec ~ 570 deg/sec response)
     final deltaSec = delta.inMicroseconds / 1000000.0;
     final targetBearing = state.bearingDegrees;
-    // Calculate shortest angular difference (-180 to +180) to target bearing
-    final angleDiff = BearingUtils.shortestDelta(
+
+    // 1. Vehicle Icon Bearing:
+    // Responsive tracking so the car immediately points along its segment
+    final carAngleDiff = BearingUtils.shortestDelta(
       visualBearingDegrees.value,
       targetBearing,
     );
-    // Smooth factor between 0 and 1 per frame; asymptotic decay for smoothness
-    final smoothFactor = (1.0 - math.exp(-12.0 * deltaSec)).clamp(0.0, 1.0);
-    visualBearingDegrees.value += angleDiff * smoothFactor;
+    final carSmoothFactor = (1.0 - math.exp(-12.0 * deltaSec)).clamp(0.0, 1.0);
+    visualBearingDegrees.value += carAngleDiff * carSmoothFactor;
 
-    // Follow car with camera
+    // 2. Camera Rotation:
+    // Gentle cinematic damping (~3.5 decay rate) so the world turns gracefully
+    // and naturally behind the vehicle without rapid panning or sharp snapping.
+    final cameraAngleDiff = BearingUtils.shortestDelta(
+      _cameraBearingDegrees,
+      visualBearingDegrees.value,
+    );
+    final cameraSmoothFactor = (1.0 - math.exp(-3.5 * deltaSec)).clamp(0.0, 1.0);
+    _cameraBearingDegrees += cameraAngleDiff * cameraSmoothFactor;
+
+    // Follow car with camera & rotate map smoothly
     if (cameraFollowing.value) {
       _mapController?.move(state.position, 16);
+      _mapController?.rotate(-_cameraBearingDegrees);
     }
 
     // Check completion
