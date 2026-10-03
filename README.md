@@ -1,4 +1,4 @@
-# GeoNavigation — Flutter Navigation Assessment
+# GeoNavigation — Flutter Navigation Prototype
 
 A production-grade, single-screen turn navigation mobile app built in Flutter for Android. The application renders OpenStreetMap tiles, obtains real-time device location via a custom native Kotlin FusedLocation bridge, queries the OSRM routing engine, and animates a vehicle along the path at constant speed with dynamic camera rotation and covered route progress tracking.
 
