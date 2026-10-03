@@ -1,0 +1,531 @@
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/scheduler.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:get/get.dart';
+import 'package:latlong2/latlong.dart';
+
+import '../../../../core/errors/app_error.dart';
+import '../../../../core/errors/location_errors.dart';
+import '../../../../core/errors/routing_errors.dart';
+import '../../../../core/utils/bearing_utils.dart';
+import '../../data/models/route_model.dart';
+import '../../data/repositories/routing_repository.dart';
+import '../../domain/entities/engine_state.dart';
+import '../../domain/entities/location_data.dart';
+import '../../domain/entities/navigation_state.dart';
+import '../../domain/services/location_service.dart';
+import '../../domain/services/navigation_engine.dart';
+
+class NavigationController extends GetxController with WidgetsBindingObserver {
+  NavigationController({
+    required LocationService locationService,
+    required RoutingRepository routingRepository,
+  })  : _locationService = locationService,
+        _routingRepository = routingRepository,
+        _engine = NavigationEngine();
+
+  /// Dependencies
+  final LocationService _locationService;
+  final RoutingRepository _routingRepository;
+  final NavigationEngine _engine;
+
+  /// Animation ticker
+  Ticker? _ticker;
+
+  /// Elapsed duration at the last tick — used to compute delta time.
+  Duration _lastElapsed = Duration.zero;
+
+  /// Whether the ticker is currently running (separate from navStatus so we can pause/resume without losing state).
+  bool _tickerRunning = false;
+
+  /// Location stream
+  StreamSubscription<LocationData>? _locationSubscription;
+
+  /// Map controller (injected from MapView)
+  MapController? _mapController;
+  bool _hasCenteredOnLocation = false;
+
+  final Rx<LocationData?> currentLocation = Rx(null);
+  final Rx<LatLng?> destination = Rx(null);
+  final Rx<RouteModel?> route = Rx(null);
+  final Rx<EngineState?> engineState = Rx(null);
+  final Rx<NavigationStatus> navStatus = NavigationStatus.idle.obs;
+  final RxBool isLoadingRoute = false.obs;
+  final Rx<AppError?> error = Rx(null);
+  final RxInt speedMultiplier = 1.obs;
+  final RxBool cameraFollowing = true.obs;
+
+  final RxBool showPermissionPrompt = false.obs;
+  final RxBool showArrivalDialog = false.obs;
+
+  /// Stale-request protection & debouncing
+  int _routeRequestVersion = 0;
+  Timer? _routeDebounceTimer;
+
+  /// The continuous visual bearing for the car icon in degrees.
+  final RxDouble visualBearingDegrees = 0.0.obs;
+  double _cameraBearingDegrees = 0.0;
+
+  @override
+  void onInit() {
+    super.onInit();
+    WidgetsBinding.instance.addObserver(this);
+    _checkInitialPermissionStatus();
+  }
+
+  @override
+  void onClose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _routeDebounceTimer?.cancel();
+    _stopTicker();
+    _ticker?.dispose();
+    _ticker = null;
+    _locationSubscription?.cancel();
+    _locationSubscription = null;
+    _locationService.dispose();
+    _routingRepository.dispose();
+    super.onClose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
+        /// Pause animation when app goes to background
+        if (_tickerRunning) _stopTicker();
+        break;
+      case AppLifecycleState.resumed:
+        _onAppResumed();
+        break;
+      case AppLifecycleState.inactive:
+        break;
+    }
+  }
+
+  Future<void> _onAppResumed() async {
+    /// Check if location services or permissions changed while app was in background / settings
+    try {
+      final enabled = await _locationService.isLocationServiceEnabled();
+      if (!enabled) {
+        if (!isClosed) {
+          error.value = const LocationServicesDisabled();
+          if (navStatus.value == NavigationStatus.navigating) {
+            pause();
+          }
+        }
+        return;
+      }
+
+      /// If location was enabled and we previously had LocationServicesDisabled error, clear it
+      if (error.value is LocationServicesDisabled) {
+        error.value = null;
+        if (currentLocation.value == null) {
+          _initLocation(promptUserIfNeeded: false);
+        }
+      }
+
+      /// Resume animation if we were navigating before backgrounding
+      if (navStatus.value == NavigationStatus.navigating && !_tickerRunning) {
+        _startTicker();
+      }
+    } catch (_) {}
+  }
+
+  /// Ticker provider injection
+  /// Called once from [NavigationPage.initState] after the widget tree mounts.
+  void initTicker(TickerProvider vsync) {
+    if (_ticker != null) return; // guard against double-init
+    _ticker = vsync.createTicker(_onTick);
+  }
+
+  /// Map controller injection
+
+  void attachMapController(MapController mapController) {
+    _mapController = mapController;
+  }
+
+  /// Checks if location permission is already granted.
+  /// If granted: immediately starts fetching location and streaming.
+  /// If not granted: presents an explanatory rationale prompt to the user
+  /// first instead of immediately requesting the OS permission on app launch.
+  Future<void> _checkInitialPermissionStatus() async {
+    // checking permission, especially on release builds.
+    await Future<void>.delayed(const Duration(milliseconds: 1000));
+    if (isClosed) return;
+    try {
+      final granted = await _locationService.hasPermission();
+      if (isClosed) return;
+      if (granted) {
+        showPermissionPrompt.value = false;
+        _initLocation(promptUserIfNeeded: false);
+      } else {
+        /// Show prompt before showing the dialog
+        showPermissionPrompt.value = true;
+      }
+    } catch (_) {
+      /// In case checkPermission fails show prompt
+      if (!isClosed) {
+        showPermissionPrompt.value = true;
+      }
+    }
+  }
+
+  /// Called when the user clicks 'Enable Location' or 'Grant Permission'
+  Future<void> grantLocationPermission() async {
+    showPermissionPrompt.value = false;
+    await _initLocation(promptUserIfNeeded: true);
+  }
+
+  /// Called if the user dismisses the contextual explanation without granting.
+  void dismissPermissionPrompt() {
+    showPermissionPrompt.value = false;
+  }
+
+  Future<void> _initLocation({bool promptUserIfNeeded = true}) async {
+    if (isClosed) return;
+    navStatus.value = NavigationStatus.loadingLocation;
+    error.value = null;
+
+    try {
+      if (promptUserIfNeeded) {
+        await _locationService.requestPermission();
+      }
+
+      final serviceEnabled = await _locationService.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (!isClosed) {
+          error.value = const LocationServicesDisabled();
+          navStatus.value = NavigationStatus.idle;
+        }
+        return;
+      }
+
+      final firstFix = await _locationService.getCurrentLocation();
+      if (isClosed) return;
+
+      currentLocation.value = firstFix;
+      navStatus.value = NavigationStatus.idle;
+      _centerMapOnLocation(firstFix, zoom: 15);
+      _startLocationStream();
+    } on LocationPermissionDenied {
+      if (!isClosed) {
+        error.value = const LocationPermissionDenied();
+        navStatus.value = NavigationStatus.idle;
+      }
+    } on LocationPermissionPermanentlyDenied {
+      if (!isClosed) {
+        error.value = const LocationPermissionPermanentlyDenied();
+        navStatus.value = NavigationStatus.idle;
+      }
+    } on LocationServicesDisabled {
+      if (!isClosed) {
+        error.value = const LocationServicesDisabled();
+        navStatus.value = NavigationStatus.idle;
+      }
+    } on LocationNotSupported {
+      if (!isClosed) {
+        error.value = const LocationNotSupported();
+        navStatus.value = NavigationStatus.idle;
+      }
+    } catch (e) {
+      if (!isClosed) {
+        error.value = LocationUnavailable(e.toString());
+        navStatus.value = NavigationStatus.idle;
+      }
+    }
+  }
+
+  void _startLocationStream() {
+    _locationSubscription?.cancel();
+    _locationSubscription = _locationService.locationStream().listen(
+      (fix) {
+        if (isClosed) return;
+        currentLocation.value = fix;
+        if (error.value is LocationServicesDisabled ||
+            error.value is LocationUnavailable ||
+            error.value is LocationTimeout) {
+          error.value = null;
+        }
+        if (!_hasCenteredOnLocation) _centerMapOnLocation(fix, zoom: 15);
+      },
+      onError: (Object e) {
+        if (isClosed) return;
+        if (e is AppError) {
+          error.value = e;
+          // If location is disabled during navigation, pause routing animation
+          if (e is LocationServicesDisabled &&
+              navStatus.value == NavigationStatus.navigating) {
+            pause();
+          }
+        }
+      },
+      cancelOnError: false,
+    );
+  }
+
+  void _centerMapOnLocation(LocationData fix, {double zoom = 15}) {
+    _hasCenteredOnLocation = true;
+    _mapController?.move(LatLng(fix.latitude, fix.longitude), zoom);
+  }
+
+  void _fitRouteBounds(RouteModel r) {
+    if (_mapController == null || r.points.isEmpty) return;
+
+    double minLat = r.points.first.latitude;
+    double maxLat = r.points.first.latitude;
+    double minLng = r.points.first.longitude;
+    double maxLng = r.points.first.longitude;
+
+    for (final pt in r.points) {
+      if (pt.latitude < minLat) minLat = pt.latitude;
+      if (pt.latitude > maxLat) maxLat = pt.latitude;
+      if (pt.longitude < minLng) minLng = pt.longitude;
+      if (pt.longitude > maxLng) maxLng = pt.longitude;
+    }
+
+    _mapController!.fitCamera(
+      CameraFit.bounds(
+        bounds: LatLngBounds(LatLng(minLat, minLng), LatLng(maxLat, maxLng)),
+        padding: const EdgeInsets.all(60),
+      ),
+    );
+  }
+
+  /// Destination & routing (with Debouncing / Throttling)
+
+  /// Called when the user long-presses on the map.
+  /// Debounces route requests by 600ms so rapid long-presses or drags
+  /// do not flood the shared public OSRM server.
+  void onMapLongPress(LatLng tappedPoint) {
+    if (isClosed) return;
+    _stopTicker();
+    _routeDebounceTimer?.cancel();
+    showArrivalDialog.value = false;
+
+    /// Immediately update destination pin and reset previous route states
+    destination.value = tappedPoint;
+    route.value = null;
+    engineState.value = null;
+    navStatus.value = NavigationStatus.idle;
+    error.value = null;
+
+    if (currentLocation.value == null) return;
+
+    /// Debounce the actual HTTP network call
+    _routeDebounceTimer = Timer(const Duration(milliseconds: 600), () {
+      if (!isClosed) {
+        _fetchRoute(tappedPoint);
+      }
+    });
+  }
+
+  Future<void> _fetchRoute(LatLng dest) async {
+    if (isClosed) return;
+    final myVersion = ++_routeRequestVersion;
+
+    isLoadingRoute.value = true;
+    navStatus.value = NavigationStatus.loadingRoute;
+    error.value = null;
+
+    try {
+      final origin = currentLocation.value;
+      if (origin == null) {
+        isLoadingRoute.value = false;
+        navStatus.value = NavigationStatus.idle;
+        error.value = const LocationUnavailable(
+          'Current location is not available.',
+        );
+        return;
+      }
+
+      final result = await _routingRepository.getRoute(
+        origin: LatLng(origin.latitude, origin.longitude),
+        destination: dest,
+      );
+
+      if (isClosed || myVersion != _routeRequestVersion) return;
+
+      // Load route into engine so it's ready to animate
+      _engine.loadRoute(result);
+
+      route.value = result;
+      isLoadingRoute.value = false;
+      navStatus.value = NavigationStatus.ready;
+      _fitRouteBounds(result);
+
+      // Show the car at the start position immediately
+      final initialState = _engine.advance(Duration.zero);
+      engineState.value = initialState;
+      visualBearingDegrees.value = initialState.bearingDegrees;
+      _cameraBearingDegrees = initialState.bearingDegrees;
+    } catch (e) {
+      if (isClosed || myVersion != _routeRequestVersion) return;
+      isLoadingRoute.value = false;
+      navStatus.value = NavigationStatus.idle;
+      error.value = e is AppError
+          ? e
+          : RoutingNetworkError(e.toString());
+    }
+  }
+
+  /// Navigation controls
+
+  void start() {
+    if (isClosed) return;
+    final status = navStatus.value;
+    if (status != NavigationStatus.ready && status != NavigationStatus.paused) {
+      return;
+    }
+    navStatus.value = NavigationStatus.navigating;
+    cameraFollowing.value = true;
+    _cameraBearingDegrees = visualBearingDegrees.value;
+    _startTicker();
+  }
+
+  void pause() {
+    if (isClosed) return;
+    if (navStatus.value != NavigationStatus.navigating) return;
+    navStatus.value = NavigationStatus.paused;
+    _stopTicker();
+  }
+
+  void resume() {
+    if (isClosed) return;
+    if (navStatus.value != NavigationStatus.paused) return;
+    navStatus.value = NavigationStatus.navigating;
+    _startTicker();
+  }
+
+  void reset() {
+    if (isClosed) return;
+    _stopTicker();
+    showArrivalDialog.value = false;
+    _engine.reset();
+    final currentRoute = route.value;
+    if (currentRoute != null) {
+      final resetState = _engine.advance(Duration.zero);
+      engineState.value = resetState;
+      visualBearingDegrees.value = resetState.bearingDegrees;
+      _cameraBearingDegrees = 0.0;
+      navStatus.value = NavigationStatus.ready;
+      cameraFollowing.value = true;
+      _mapController?.rotate(0);
+      _fitRouteBounds(currentRoute);
+    }
+  }
+
+  void setSpeed(int multiplier) {
+    if (isClosed) return;
+    speedMultiplier.value = multiplier;
+    _engine.setSpeedMultiplier(multiplier.toDouble());
+  }
+
+  /// Camera/View
+
+  void onUserMapGesture() {
+    if (!cameraFollowing.value) return;
+    cameraFollowing.value = false;
+  }
+
+  void recenter() {
+    if (isClosed) return;
+    cameraFollowing.value = true;
+    final state = engineState.value;
+    if (state != null) {
+      _cameraBearingDegrees = visualBearingDegrees.value;
+      _mapController?.move(state.position, 16);
+      _mapController?.rotate(-_cameraBearingDegrees);
+    }
+  }
+
+  /// Ticker implementation
+
+  void _startTicker() {
+    if (_ticker == null || _tickerRunning) return;
+    _lastElapsed = Duration.zero;
+    _ticker!.start();
+    _tickerRunning = true;
+  }
+
+  void _stopTicker() {
+    if (!_tickerRunning) return;
+    _ticker?.stop();
+    _tickerRunning = false;
+    _lastElapsed = Duration.zero;
+  }
+
+  /// Called on every vsync frame while the ticker is active.
+  void _onTick(Duration elapsed) {
+    if (isClosed) return;
+    if (navStatus.value != NavigationStatus.navigating) {
+      _stopTicker();
+      return;
+    }
+
+    /// Compute delta time — guard against the first frame (lastElapsed == 0)
+    final delta = _lastElapsed == Duration.zero
+        ? Duration.zero
+        : elapsed - _lastElapsed;
+    _lastElapsed = elapsed;
+
+    /// Skip the first zero-delta frame to avoid a position jump
+    if (delta == Duration.zero) return;
+
+    final state = _engine.advance(delta);
+    engineState.value = state;
+
+    final deltaSec = delta.inMicroseconds / 1000000.0;
+    final targetBearing = state.bearingDegrees;
+
+    /// Vehicle Icon Bearing:
+    /// Responsive tracking so the car immediately points along its segment
+    final carAngleDiff = BearingUtils.shortestDelta(
+      visualBearingDegrees.value,
+      targetBearing,
+    );
+    final carSmoothFactor = (1.0 - math.exp(-12.0 * deltaSec)).clamp(0.0, 1.0);
+    visualBearingDegrees.value += carAngleDiff * carSmoothFactor;
+
+    /// Camera Rotation:
+    /// Gentle cinematic damping (~3.5 decay rate) so the world turns gracefully
+    /// and naturally behind the vehicle without rapid panning or sharp snapping.
+    final cameraAngleDiff = BearingUtils.shortestDelta(
+      _cameraBearingDegrees,
+      visualBearingDegrees.value,
+    );
+    final cameraSmoothFactor = (1.0 - math.exp(-3.5 * deltaSec)).clamp(0.0, 1.0);
+    _cameraBearingDegrees += cameraAngleDiff * cameraSmoothFactor;
+
+    /// Follow car with camera & rotate map smoothly
+    if (cameraFollowing.value) {
+      _mapController?.move(state.position, 16);
+      _mapController?.rotate(-_cameraBearingDegrees);
+    }
+
+    /// Check completion
+    if (state.isCompleted) {
+      navStatus.value = NavigationStatus.completed;
+      _stopTicker();
+      showArrivalDialog.value = true;
+    }
+  }
+
+  Future<void> openAppSettings() => _locationService.openAppSettings();
+
+  Future<void> openLocationSettings() => _locationService.openLocationSettings();
+
+  void dismissArrivalDialog() {
+    showArrivalDialog.value = false;
+  }
+
+  void retryLocation() {
+    error.value = null;
+    _hasCenteredOnLocation = false;
+    grantLocationPermission();
+  }
+}
