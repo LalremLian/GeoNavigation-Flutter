@@ -165,8 +165,13 @@ class LocationManager(private val context: Context) {
             }
 
             override fun onLocationAvailability(availability: LocationAvailability) {
-                if (!availability.isLocationAvailable) {
-                    onError(ErrorCodes.LOCATION_UNAVAILABLE)
+                // Fused availability can briefly be false while a fix is
+                // reacquired. Only surface an error when Android confirms
+                // that both location providers are actually disabled.
+                if (!availability.isLocationAvailable &&
+                    !isLocationServiceEnabled()
+                ) {
+                    onError(ErrorCodes.LOCATION_SERVICE_DISABLED)
                 }
             }
         }

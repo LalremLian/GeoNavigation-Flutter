@@ -32,6 +32,10 @@ class RoutingRepository {
       destLng: destination.longitude,
     );
 
+    if (!response.isOk || response.routes.isEmpty) {
+      throw const NoRouteFound();
+    }
+
     // Take the best route (index 0 — OSRM orders by best first)
     final best = response.routes.first;
 
@@ -51,7 +55,10 @@ class RoutingRepository {
     }
 
     // Validate: must have non-zero distance
-    if (best.distanceMeters <= 0) {
+    if (!best.distanceMeters.isFinite ||
+        !best.durationSeconds.isFinite ||
+        best.distanceMeters <= 0 ||
+        best.durationSeconds < 0) {
       throw const InvalidRoute('Route has zero distance');
     }
 

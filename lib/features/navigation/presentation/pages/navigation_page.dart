@@ -59,18 +59,11 @@ class _NavigationPageState extends State<NavigationPage>
           // -------------------------------------------------------------------
           // Distance / duration info panel
           // -------------------------------------------------------------------
-          Obx(() {
-            final hasError = _controller.error.value != null;
-            // Push info panel below error overlay when error is showing
-            return AnimatedPadding(
-              duration: const Duration(milliseconds: 200),
-              padding: EdgeInsets.only(top: hasError ? 100 : 0),
-              child: const Align(
-                alignment: Alignment.topCenter,
-                child: InfoPanel(),
-              ),
-            );
-          }),
+          const Positioned(
+            left: 0,
+            bottom: 145,
+            child: InfoPanel(),
+          ),
 
           // -------------------------------------------------------------------
           // Location loading indicator
@@ -109,10 +102,16 @@ class _NavigationPageState extends State<NavigationPage>
           // -------------------------------------------------------------------
           // Start / Pause / Resume / Reset + speed controls
           // -------------------------------------------------------------------
-          const Align(
-            alignment: Alignment.bottomCenter,
-            child: ControlBar(),
-          ),
+          Obx(() {
+            if (_controller.route.value == null) {
+              return const SizedBox.shrink();
+            }
+
+            return const Align(
+              alignment: Alignment.bottomCenter,
+              child: ControlBar(),
+            );
+          }),
 
           // -------------------------------------------------------------------
           // Recenter button — visible only after manual map pan

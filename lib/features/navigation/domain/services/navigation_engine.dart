@@ -61,7 +61,10 @@ class NavigationEngine {
   ///   - Duplicate / zero-distance segments (skipped in distance calc)
   ///   - Non-finite coordinates (segment treated as zero-distance)
   void loadRoute(RouteModel route) {
-    _points = route.points;
+    _points = route.points
+        .where((point) =>
+            point.latitude.isFinite && point.longitude.isFinite)
+        .toList(growable: false);
     _traveledMeters = 0;
     _cumDist = _buildCumulativeDistances(_points);
     _totalDistanceMeters = _cumDist.isNotEmpty ? _cumDist.last : 0;
@@ -72,7 +75,17 @@ class NavigationEngine {
   /// Returns a fresh [EngineState]. Safe to call on every animation frame.
   EngineState advance(Duration deltaTime) {
     // Edge cases: no route or already complete
-    if (_points.isEmpty) return EngineState.empty;
+    if (_points.isEmpty) {
+      return const EngineState(
+        position: LatLng(0, 0),
+        bearingDegrees: 0,
+        traveledDistanceMeters: 0,
+        remainingDistanceMeters: 0,
+        remainingDurationSeconds: 0,
+        progress: 1,
+        isCompleted: true,
+      );
+    }
     if (_points.length == 1) {
       return EngineState(
         position: _points.first,
@@ -97,7 +110,10 @@ class NavigationEngine {
   /// Sets the speed multiplier (1, 2 or 5).
   /// Does NOT reset progress — car continues from the same position.
   void setSpeedMultiplier(double multiplier) {
-    assert(multiplier > 0, 'Speed multiplier must be positive');
+    if (!multiplier.isFinite || multiplier <= 0) {
+      _speedMultiplier = 1.0;
+      return;
+    }
     _speedMultiplier = multiplier;
   }
 

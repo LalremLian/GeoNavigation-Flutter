@@ -18,7 +18,7 @@ class ControlBar extends StatelessWidget {
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.95),
+          color: Colors.white.withValues(alpha: 0.85),
           borderRadius: BorderRadius.circular(16),
           boxShadow: const [
             BoxShadow(

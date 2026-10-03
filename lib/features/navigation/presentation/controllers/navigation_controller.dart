@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../../../../core/errors/app_error.dart';
 import '../../../../core/errors/location_errors.dart';
+import '../../../../core/errors/routing_errors.dart';
 import '../../data/models/route_model.dart';
 import '../../data/repositories/routing_repository.dart';
 import '../../domain/entities/engine_state.dart';
@@ -208,6 +209,9 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
       (fix) {
         if (isClosed) return;
         currentLocation.value = fix;
+        // A valid stream fix means any earlier transient availability error
+        // is no longer actionable.
+        error.value = null;
         if (!_hasCenteredOnLocation) _centerMapOnLocation(fix, zoom: 15);
       },
       onError: (Object e) {
@@ -276,6 +280,9 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
       if (origin == null) {
         isLoadingRoute.value = false;
         navStatus.value = NavigationStatus.idle;
+        error.value = const LocationUnavailable(
+          'Current location is not available.',
+        );
         return;
       }
 
@@ -300,7 +307,9 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
       if (isClosed || myVersion != _routeRequestVersion) return;
       isLoadingRoute.value = false;
       navStatus.value = NavigationStatus.idle;
-      if (e is AppError) error.value = e;
+      error.value = e is AppError
+          ? e
+          : RoutingNetworkError(e.toString());
     }
   }
 
