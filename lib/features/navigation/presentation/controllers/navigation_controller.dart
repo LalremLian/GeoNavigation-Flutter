@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
@@ -9,6 +10,7 @@ import 'package:latlong2/latlong.dart';
 import '../../../../core/errors/app_error.dart';
 import '../../../../core/errors/location_errors.dart';
 import '../../../../core/errors/routing_errors.dart';
+import '../../../../core/utils/bearing_utils.dart';
 import '../../data/models/route_model.dart';
 import '../../data/repositories/routing_repository.dart';
 import '../../domain/entities/engine_state.dart';
@@ -79,11 +81,23 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
   final RxInt speedMultiplier = 1.obs;
   final RxBool cameraFollowing = true.obs;
 
+  final RxBool showPermissionPrompt = false.obs;
+  final RxBool showArrivalDialog = false.obs;
+
   // ---------------------------------------------------------------------------
-  // Stale-request protection
+  // Stale-request protection & debouncing
   // ---------------------------------------------------------------------------
 
   int _routeRequestVersion = 0;
+  Timer? _routeDebounceTimer;
+
+  // ---------------------------------------------------------------------------
+  // Visual bearing interpolation (shortest-angular path accumulation)
+  // ---------------------------------------------------------------------------
+
+  /// The continuous visual bearing in degrees.
+  /// Does not jump at 0/360 wrap-around; accumulates delta using [BearingUtils.shortestDelta].
+  final RxDouble visualBearingDegrees = 0.0.obs;
 
   // ---------------------------------------------------------------------------
   // Lifecycle
@@ -93,12 +107,13 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
   void onInit() {
     super.onInit();
     WidgetsBinding.instance.addObserver(this);
-    _initLocation();
+    _checkInitialPermissionStatus();
   }
 
   @override
   void onClose() {
     WidgetsBinding.instance.removeObserver(this);
+    _routeDebounceTimer?.cancel();
     _stopTicker();
     _ticker?.dispose();
     _ticker = null;
@@ -148,16 +163,57 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
   }
 
   // ---------------------------------------------------------------------------
-  // Location initialisation
+  // Location initialisation & permission prompt flow
   // ---------------------------------------------------------------------------
 
-  Future<void> _initLocation() async {
+  /// Checks if location permission is already granted.
+  /// If granted: immediately starts fetching location and streaming.
+  /// If not granted: presents an explanatory rationale prompt to the user
+  /// first instead of immediately requesting the OS permission on app launch.
+  Future<void> _checkInitialPermissionStatus() async {
+    // Let the Flutter activity finish attaching the native channels before
+    // checking permission, especially on release builds.
+    await Future<void>.delayed(const Duration(milliseconds: 1000));
+    if (isClosed) return;
+    try {
+      final granted = await _locationService.hasPermission();
+      if (isClosed) return;
+      if (granted) {
+        showPermissionPrompt.value = false;
+        _initLocation(promptUserIfNeeded: false);
+      } else {
+        // Show contextual explanation/prompt before invoking the OS dialog
+        showPermissionPrompt.value = true;
+      }
+    } catch (_) {
+      // In case checkPermission fails (e.g. desktop/unsupported), show prompt or handle gracefully
+      if (!isClosed) {
+        showPermissionPrompt.value = true;
+      }
+    }
+  }
+
+  /// Called when the user clicks 'Enable Location' or 'Grant Permission' on
+  /// the permission prompt or error banner.
+  Future<void> grantLocationPermission() async {
+    showPermissionPrompt.value = false;
+    await _initLocation(promptUserIfNeeded: true);
+  }
+
+  /// Called if the user dismisses the contextual explanation without granting.
+  void dismissPermissionPrompt() {
+    showPermissionPrompt.value = false;
+  }
+
+  Future<void> _initLocation({bool promptUserIfNeeded = true}) async {
     if (isClosed) return;
     navStatus.value = NavigationStatus.loadingLocation;
     error.value = null;
 
     try {
-      await _locationService.requestPermission();
+      if (promptUserIfNeeded) {
+        await _locationService.requestPermission();
+      }
 
       final serviceEnabled = await _locationService.isLocationServiceEnabled();
       if (!serviceEnabled) {
@@ -251,12 +307,20 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
   }
 
   // ---------------------------------------------------------------------------
-  // Destination & routing
+  // Destination & routing (with Debouncing / Throttling)
   // ---------------------------------------------------------------------------
 
+  /// Called when the user long-presses on the map.
+  ///
+  /// Debounces route requests by 600ms so rapid long-presses or drags
+  /// do not flood the shared public OSRM server.
   void onMapLongPress(LatLng tappedPoint) {
     if (isClosed) return;
     _stopTicker();
+    _routeDebounceTimer?.cancel();
+    showArrivalDialog.value = false;
+
+    // Immediately update destination pin and reset previous route/car states
     destination.value = tappedPoint;
     route.value = null;
     engineState.value = null;
@@ -264,7 +328,13 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
     error.value = null;
 
     if (currentLocation.value == null) return;
-    _fetchRoute(tappedPoint);
+
+    // Debounce the actual HTTP network call
+    _routeDebounceTimer = Timer(const Duration(milliseconds: 600), () {
+      if (!isClosed) {
+        _fetchRoute(tappedPoint);
+      }
+    });
   }
 
   Future<void> _fetchRoute(LatLng dest) async {
@@ -302,7 +372,9 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
       _fitRouteBounds(result);
 
       // Show the car at the start position immediately
-      engineState.value = _engine.advance(Duration.zero);
+      final initialState = _engine.advance(Duration.zero);
+      engineState.value = initialState;
+      visualBearingDegrees.value = initialState.bearingDegrees;
     } catch (e) {
       if (isClosed || myVersion != _routeRequestVersion) return;
       isLoadingRoute.value = false;
@@ -345,10 +417,13 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
   void reset() {
     if (isClosed) return;
     _stopTicker();
+    showArrivalDialog.value = false;
     _engine.reset();
     final currentRoute = route.value;
     if (currentRoute != null) {
-      engineState.value = _engine.advance(Duration.zero);
+      final resetState = _engine.advance(Duration.zero);
+      engineState.value = resetState;
+      visualBearingDegrees.value = resetState.bearingDegrees;
       navStatus.value = NavigationStatus.ready;
       cameraFollowing.value = true;
       _fitRouteBounds(currentRoute);
@@ -420,6 +495,19 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
     final state = _engine.advance(delta);
     engineState.value = state;
 
+    // Smoothly interpolate visual bearing along the shortest angular path:
+    // deltaSec controls rotational speed (e.g. 10 radians/sec ~ 570 deg/sec response)
+    final deltaSec = delta.inMicroseconds / 1000000.0;
+    final targetBearing = state.bearingDegrees;
+    // Calculate shortest angular difference (-180 to +180) to target bearing
+    final angleDiff = BearingUtils.shortestDelta(
+      visualBearingDegrees.value,
+      targetBearing,
+    );
+    // Smooth factor between 0 and 1 per frame; asymptotic decay for smoothness
+    final smoothFactor = (1.0 - math.exp(-12.0 * deltaSec)).clamp(0.0, 1.0);
+    visualBearingDegrees.value += angleDiff * smoothFactor;
+
     // Follow car with camera
     if (cameraFollowing.value) {
       _mapController?.move(state.position, 16);
@@ -429,6 +517,7 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
     if (state.isCompleted) {
       navStatus.value = NavigationStatus.completed;
       _stopTicker();
+      showArrivalDialog.value = true;
     }
   }
 
@@ -438,9 +527,13 @@ class NavigationController extends GetxController with WidgetsBindingObserver {
 
   Future<void> openAppSettings() => _locationService.openAppSettings();
 
+  void dismissArrivalDialog() {
+    showArrivalDialog.value = false;
+  }
+
   void retryLocation() {
     error.value = null;
     _hasCenteredOnLocation = false;
-    _initLocation();
+    grantLocationPermission();
   }
 }

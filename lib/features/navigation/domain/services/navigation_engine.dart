@@ -208,6 +208,19 @@ class NavigationEngine {
         effectiveSpeed > 0 ? remaining / effectiveSpeed : 0.0;
     final completed = _traveledMeters >= _totalDistanceMeters;
 
+    // Build the covered route slice (from origin up to current car position)
+    final covered = <LatLng>[];
+    if (_traveledMeters > 0) {
+      for (int i = 0; i <= segIdx; i++) {
+        covered.add(_points[i]);
+      }
+      if (covered.isEmpty ||
+          covered.last.latitude != position.latitude ||
+          covered.last.longitude != position.longitude) {
+        covered.add(position);
+      }
+    }
+
     return EngineState(
       position: position,
       bearingDegrees: bearing,
@@ -216,6 +229,7 @@ class NavigationEngine {
       remainingDurationSeconds: remainingDuration,
       progress: progress,
       isCompleted: completed,
+      coveredPoints: covered,
     );
   }
 

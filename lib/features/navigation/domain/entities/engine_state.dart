@@ -12,10 +12,14 @@ class EngineState {
     required this.remainingDurationSeconds,
     required this.progress,
     required this.isCompleted,
+    this.coveredPoints = const [],
   });
 
   /// Car's current interpolated position on the route.
   final LatLng position;
+
+  /// Path coordinates covered so far from the origin up to [position].
+  final List<LatLng> coveredPoints;
 
   /// Car's current heading in degrees [0, 360).
   final double bearingDegrees;

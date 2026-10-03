@@ -18,13 +18,28 @@ class RouteLayer extends StatelessWidget {
       final r = controller.route.value;
       if (r == null || r.isEmpty) return const SizedBox.shrink();
 
+      final covered = controller.engineState.value?.coveredPoints ?? const [];
+
       return PolylineLayer(
         polylines: [
+          // 1. Full/uncovered route (vibrant navigation blue)
           Polyline(
             points: r.points,
-            strokeWidth: 5,
-            color: Colors.blue.shade700,
+            strokeWidth: 6,
+            color: Colors.blue.shade600,
+            strokeCap: StrokeCap.round,
+            strokeJoin: StrokeJoin.round,
           ),
+
+          // 2. Covered/traveled route segment (light grey so user can see progress)
+          if (covered.length >= 2)
+            Polyline(
+              points: covered,
+              strokeWidth: 6,
+              color: Colors.grey.shade400.withValues(alpha: 0.9),
+              strokeCap: StrokeCap.round,
+              strokeJoin: StrokeJoin.round,
+            ),
         ],
       );
     });

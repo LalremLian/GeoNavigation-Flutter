@@ -39,9 +39,9 @@ class CarMarker extends StatelessWidget {
         markers: [
           Marker(
             point: state.position,
-            width: 44,
-            height: 44,
-            child: _CarIcon(bearingDegrees: state.bearingDegrees),
+            width: 48,
+            height: 48,
+            child: _CarIcon(bearingDegrees: controller.visualBearingDegrees.value),
           ),
         ],
       );
@@ -49,7 +49,7 @@ class CarMarker extends StatelessWidget {
   }
 }
 
-/// Navigation arrow icon with a circular background.
+/// Car pointer using the top-down [car_icon.png] asset.
 ///
 /// Rotated by [bearingDegrees] so it points in the direction of travel.
 /// [Transform.rotate] uses radians, clockwise positive, matching
@@ -63,25 +63,12 @@ class _CarIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     return Transform.rotate(
       angle: bearingDegrees * math.pi / 180,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: const BoxDecoration(
-          color: Colors.deepOrange,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black38,
-              blurRadius: 6,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: const Icon(
-          Icons.navigation,
-          color: Colors.white,
-          size: 26,
-        ),
+      child: Image.asset(
+        'assets/icons/car_icon.png',
+        width: 48,
+        height: 48,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.medium,
       ),
     );
   }
