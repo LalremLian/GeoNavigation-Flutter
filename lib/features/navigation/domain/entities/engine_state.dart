@@ -1,8 +1,5 @@
 import 'package:latlong2/latlong.dart';
 
-/// Snapshot of the [NavigationEngine] state at a single animation frame.
-///
-/// Immutable — the engine produces a new instance every tick.
 class EngineState {
   const EngineState({
     required this.position,

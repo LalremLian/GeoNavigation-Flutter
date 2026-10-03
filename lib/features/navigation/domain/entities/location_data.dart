@@ -1,6 +1,4 @@
-/// Typed value object representing a single location fix from the device.
-///
-/// Pure Dart — no Flutter, GetX or native dependencies.
+
 class LocationData {
   const LocationData({
     required this.latitude,

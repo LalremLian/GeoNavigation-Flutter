@@ -4,8 +4,6 @@ import 'package:latlong2/latlong.dart';
 ///
 /// OSRM uses the standard Google Polyline encoding with precision 1e-5.
 /// Reference: https://developers.google.com/maps/documentation/utilities/polylinealgorithm
-///
-/// No Flutter/GetX dependencies — safe for pure Dart unit tests.
 abstract final class PolylineDecoder {
   /// Decodes [encoded] and returns the coordinate list.
   /// Returns an empty list if [encoded] is empty or null.

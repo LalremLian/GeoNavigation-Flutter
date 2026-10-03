@@ -6,11 +6,6 @@ import '../../../../core/errors/location_errors.dart';
 import '../../../../core/errors/routing_errors.dart';
 import '../controllers/navigation_controller.dart';
 
-/// Displays a contextual error card overlaid on the map when the controller
-/// has a non-null [NavigationController.error].
-///
-/// Auto-dismisses when the error is cleared. Each error type shows a
-/// tailored message and optional action button.
 class ErrorOverlay extends StatelessWidget {
   const ErrorOverlay({super.key});
 
@@ -174,7 +169,6 @@ class ErrorOverlay extends StatelessWidget {
   }
 }
 
-/// Simple data class holding content for one error card.
 class _ErrorContent {
   const _ErrorContent({
     required this.icon,

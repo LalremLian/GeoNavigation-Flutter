@@ -1,7 +1,4 @@
 /// Channel name constants shared between Dart and Kotlin.
-///
-/// These strings MUST match exactly what is registered in MainActivity.kt.
-/// Centralised here so a typo in one place doesn't cause a silent channel mismatch.
 abstract final class ChannelConstants {
   /// One-shot commands: requestPermission, getCurrentLocation, openAppSettings, etc.
   static const String locationMethod = 'com.example.navtest/location';

@@ -1,7 +1,5 @@
-/// Raw OSRM JSON → typed response object.
-///
-/// Only used inside [OsrmService] to parse the HTTP response before
-/// it is converted into a [RouteModel].
+
+
 class OsrmResponse {
   const OsrmResponse({
     required this.code,
@@ -20,7 +18,6 @@ class OsrmResponse {
     return OsrmResponse(code: code, routes: routes);
   }
 
-  /// OSRM status code — "Ok" means success.
   final String code;
   final List<OsrmRoute> routes;
 

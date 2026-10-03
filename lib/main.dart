@@ -17,7 +17,7 @@ Future<void> main() async {
   ]);
 
   // Resolve flavor-injected config (routing URL, flavor name) from native side.
-  // Falls back to safe defaults if the channel isn't wired yet (e.g. Phase 1).
+  // Falls back to safe defaults if the channel isn't wired yet.
   await AppConfig.initialise();
 
   runApp(const GeoNavigationApp());
@@ -33,7 +33,6 @@ class GeoNavigationApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(),
 
-      // GetX named routes — single-screen app, so only one route needed.
       initialRoute: '/',
       getPages: [
         GetPage(

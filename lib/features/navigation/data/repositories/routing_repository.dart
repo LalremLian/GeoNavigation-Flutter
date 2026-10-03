@@ -5,26 +5,16 @@ import '../../../../core/utils/polyline_decoder.dart';
 import '../models/route_model.dart';
 import '../services/osrm_service.dart';
 
-/// Orchestrates [OsrmService] and converts raw OSRM responses into
-/// validated [RouteModel] objects ready for the rest of the app.
-///
-/// This is the single routing entry-point. [NavigationController] calls
-/// this; nothing above it touches HTTP or JSON.
 class RoutingRepository {
-  RoutingRepository({required OsrmService osrmService})
-      : _osrmService = osrmService;
+  RoutingRepository({required OsrmService osrmService}) : _osrmService = osrmService;
 
   final OsrmService _osrmService;
 
-  /// Fetches and returns a validated [RouteModel].
-  ///
-  /// Throws typed [AppError] subclasses on any failure.
-  /// The caller is responsible for stale-request versioning.
   Future<RouteModel> getRoute({
     required LatLng origin,
     required LatLng destination,
   }) async {
-    // Fetch from OSRM — throws on network/timeout/no-route errors
+    // Fetch from OSRM
     final response = await _osrmService.fetchRoute(
       originLat: origin.latitude,
       originLng: origin.longitude,

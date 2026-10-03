@@ -3,8 +3,6 @@ import 'package:get/get.dart';
 
 import '../controllers/navigation_controller.dart';
 
-/// Modal dialog shown once the car reaches its destination.
-/// Includes congratulatory badge, trip completed message, and an "Okay" button.
 class ArrivalDialog extends StatelessWidget {
   const ArrivalDialog({super.key});
 

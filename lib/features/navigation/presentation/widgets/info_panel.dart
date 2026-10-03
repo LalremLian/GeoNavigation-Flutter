@@ -5,9 +5,6 @@ import '../../../../core/utils/distance_utils.dart';
 import '../../domain/entities/navigation_state.dart';
 import '../controllers/navigation_controller.dart';
 
-/// Overlay panel showing total and remaining distance/duration.
-///
-/// Sits at the top of the screen over the map.
 class InfoPanel extends StatelessWidget {
   const InfoPanel({super.key});
 

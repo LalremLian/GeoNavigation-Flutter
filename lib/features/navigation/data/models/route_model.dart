@@ -1,8 +1,5 @@
 import 'package:latlong2/latlong.dart';
 
-/// Decoded, validated route returned by [RoutingRepository].
-///
-/// Immutable value object — created once and passed through the system.
 class RouteModel {
   const RouteModel({
     required this.points,

@@ -5,61 +5,25 @@ import '../../../../core/utils/distance_utils.dart';
 import '../../data/models/route_model.dart';
 import '../entities/engine_state.dart';
 
-/// Pure-Dart navigation engine.
-///
-/// Responsibilities:
-///   - Pre-computes cumulative segment distances for O(log n) lookups
-///   - Distance-based interpolation: car moves at constant speed in m/s,
-///     completely independent of route-point density
-///   - Bearing calculation with shortest-angle interpolation
-///   - Remaining distance and duration tracking
-///   - Route completion detection
-///
-/// Constraints (strictly enforced — required for unit testability):
-///   - NO Flutter widgets, BuildContext, flutter_map, MapController, GetX
-///   - All public methods are synchronous
-///   - Safe to instantiate and call in pure-Dart unit tests
 class NavigationEngine {
   NavigationEngine();
-
-  // ---------------------------------------------------------------------------
-  // Configuration
-  // ---------------------------------------------------------------------------
 
   /// Base driving speed in metres/second (≈ 50 km/h).
   static const double baseSpeedMps = 13.89;
 
   double _speedMultiplier = 1.0;
 
-  // ---------------------------------------------------------------------------
-  // Route state (set by loadRoute)
-  // ---------------------------------------------------------------------------
-
+  /// Route state (set by loadRoute)
   List<LatLng> _points = const [];
 
   /// Cumulative distance from point[0] to point[i], in metres.
   /// _cumDist[0] == 0, _cumDist[n-1] == totalDistanceMeters.
   List<double> _cumDist = const [];
-
   double _totalDistanceMeters = 0;
 
-  // ---------------------------------------------------------------------------
-  // Progress state
-  // ---------------------------------------------------------------------------
-
+  /// Progress state
   double _traveledMeters = 0;
 
-  // ---------------------------------------------------------------------------
-  // Public API
-  // ---------------------------------------------------------------------------
-
-  /// Loads [route] and resets progress to the beginning.
-  ///
-  /// Handles:
-  ///   - Empty route
-  ///   - Single-point route
-  ///   - Duplicate / zero-distance segments (skipped in distance calc)
-  ///   - Non-finite coordinates (segment treated as zero-distance)
   void loadRoute(RouteModel route) {
     _points = route.points
         .where((point) =>
@@ -71,10 +35,9 @@ class NavigationEngine {
   }
 
   /// Advances the car by [deltaTime] at the current effective speed.
-  ///
   /// Returns a fresh [EngineState]. Safe to call on every animation frame.
   EngineState advance(Duration deltaTime) {
-    // Edge cases: no route or already complete
+    /// Edge cases: no route or already complete
     if (_points.isEmpty) {
       return const EngineState(
         position: LatLng(0, 0),
@@ -98,7 +61,7 @@ class NavigationEngine {
       );
     }
 
-    // Advance by distance = speed × time
+    /// Advance by distance = speed × time
     final deltaSec = deltaTime.inMicroseconds / 1000000.0;
     _traveledMeters =
         (_traveledMeters + effectiveSpeed * deltaSec)
@@ -135,10 +98,7 @@ class NavigationEngine {
   /// Effective speed in metres/second.
   double get effectiveSpeed => baseSpeedMps * _speedMultiplier;
 
-  // ---------------------------------------------------------------------------
-  // Internal: cumulative distance table
-  // ---------------------------------------------------------------------------
-
+  /// Internal: cumulative distance table
   static List<double> _buildCumulativeDistances(List<LatLng> points) {
     if (points.isEmpty) return const [];
     if (points.length == 1) return [0.0];
@@ -165,16 +125,13 @@ class NavigationEngine {
       lat2: b.latitude,
       lng2: b.longitude,
     );
-    // Guard against NaN / Infinity from haversine (e.g. duplicate points)
+    /// Guard against NaN / Infinity from haversine (e.g. duplicate points)
     return d.isFinite ? d : 0;
   }
 
-  // ---------------------------------------------------------------------------
-  // Internal: build EngineState from current _traveledMeters
-  // ---------------------------------------------------------------------------
-
+  /// Internal: build EngineState from current _traveledMeters
   EngineState _buildState() {
-    // Binary search: find the segment that contains _traveledMeters
+    /// Binary search: find the segment that contains _traveledMeters
     final segIdx = _findSegmentIndex(_traveledMeters);
     final segStart = _cumDist[segIdx];
     final segEnd = _cumDist[segIdx + 1];
@@ -184,11 +141,11 @@ class NavigationEngine {
     final double bearing;
 
     if (segLen <= 0) {
-      // Zero-distance segment (duplicate points) — sit at the start point
+      /// Zero-distance segment (duplicate points) — sit at the start point
       position = _points[segIdx];
       bearing = _bearingToNext(segIdx);
     } else {
-      // Linear interpolation within the segment
+      /// Linear interpolation within the segment
       final t = (_traveledMeters - segStart) / segLen;
       position = _interpolate(_points[segIdx], _points[segIdx + 1], t);
       bearing = BearingUtils.bearing(
@@ -208,7 +165,7 @@ class NavigationEngine {
         effectiveSpeed > 0 ? remaining / effectiveSpeed : 0.0;
     final completed = _traveledMeters >= _totalDistanceMeters;
 
-    // Build the covered route slice (from origin up to current car position)
+    /// Build the covered route slice (from origin up to current car position)
     final covered = <LatLng>[];
     if (_traveledMeters > 0) {
       for (int i = 0; i <= segIdx; i++) {
@@ -233,9 +190,7 @@ class NavigationEngine {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Internal: binary search for segment index
-  // ---------------------------------------------------------------------------
+  /// Internal: binary search for segment index
 
   /// Returns index i such that _cumDist[i] <= traveled < _cumDist[i+1].
   /// Clamps to the last valid segment.
@@ -246,7 +201,7 @@ class NavigationEngine {
     }
 
     int lo = 0;
-    int hi = _cumDist.length - 2; // last valid segment start index
+    int hi = _cumDist.length - 2; /// last valid segment start index
 
     while (lo < hi) {
       final mid = (lo + hi + 1) ~/ 2;
@@ -259,10 +214,7 @@ class NavigationEngine {
     return lo;
   }
 
-  // ---------------------------------------------------------------------------
-  // Internal: interpolation + bearing helpers
-  // ---------------------------------------------------------------------------
-
+  /// Internal: interpolation + bearing helpers
   static LatLng _interpolate(LatLng a, LatLng b, double t) {
     // Clamp t to avoid floating-point overshoot
     final tc = t.clamp(0.0, 1.0);
@@ -285,6 +237,6 @@ class NavigationEngine {
         );
       }
     }
-    return 0; // no non-duplicate next point found
+    return 0; /// no non-duplicate next point found
   }
 }

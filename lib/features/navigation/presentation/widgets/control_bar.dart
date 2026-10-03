@@ -5,7 +5,6 @@ import '../../domain/entities/navigation_state.dart';
 import '../controllers/navigation_controller.dart';
 import 'speed_selector.dart';
 
-/// Bottom control bar with Start / Pause / Resume / Reset and speed selector.
 class ControlBar extends StatelessWidget {
   const ControlBar({super.key});
 
@@ -65,7 +64,7 @@ class ControlBar extends StatelessWidget {
                       onTap: controller.resume,
                     ),
 
-                  // Reset button — visible whenever a route is loaded
+                  // Reset button
                   if (hasRoute &&
                       status != NavigationStatus.idle &&
                       status != NavigationStatus.loadingLocation &&

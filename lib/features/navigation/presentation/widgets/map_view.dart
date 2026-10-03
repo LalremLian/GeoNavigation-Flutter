@@ -7,18 +7,6 @@ import '../controllers/navigation_controller.dart';
 import 'car_marker.dart';
 import 'route_layer.dart';
 
-/// Full-screen map widget backed by flutter_map + OpenStreetMap.
-///
-/// Rendering responsibilities:
-///   - OSM tile layer with correct attribution
-///   - Current location marker (blue dot)
-///   - Destination marker (red pin)
-///   - Route polyline (via [RouteLayer])
-///   - Animated car marker (via [CarMarker])
-///   - Long-press → destination selection
-///   - Map gesture detection → camera unfollow (Phase 9)
-///
-/// No routing, interpolation or bearing mathematics live here.
 class MapView extends StatefulWidget {
   const MapView({super.key});
 
@@ -34,7 +22,7 @@ class _MapViewState extends State<MapView> {
   void initState() {
     super.initState();
     _navController = Get.find<NavigationController>();
-    // Inject the MapController so the NavigationController can move the camera
+    /// Inject the MapController so the NavigationController can move the camera
     _navController.attachMapController(_mapController);
   }
 
@@ -50,51 +38,42 @@ class _MapViewState extends State<MapView> {
       mapController: _mapController,
       options: MapOptions(
         initialCenter: const LatLng(0, 0),
-        initialZoom: 2, // world view until GPS fix arrives
+        initialZoom: 2, /// world view until GPS fix arrives
         onLongPress: (tapPosition, point) {
           _navController.onMapLongPress(point);
         },
         onMapEvent: (event) {
-          // Detect any user-initiated map movement and stop camera following.
-          // We check for gesture sources — anything that is NOT a programmatic
-          // move from the MapController, fitCamera, or size changes.
+          /// Detect any user-initiated map movement and stop camera following.
           if (event is MapEventMove) {
             switch (event.source) {
               case MapEventSource.mapController:
               case MapEventSource.fitCamera:
               case MapEventSource.nonRotatedSizeChange:
               case MapEventSource.interactiveFlagsChanged:
-                // Programmatic — do not interrupt camera following
                 break;
               default:
-                // User gesture (drag, fling, pinch, scroll wheel, etc.)
+                /// User gesture (drag, fling, pinch, scroll wheel, etc.)
                 _navController.onUserMapGesture();
             }
           }
         },
       ),
       children: [
-        // ---------------------------------------------------------------
-        // OSM tile layer — attribution required by OSM tile usage policy
-        // ---------------------------------------------------------------
+        /// OSM tile layer — attribution required by OSM tile usage policy
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.example.navtest',
           maxZoom: 19,
         ),
 
-        // ---------------------------------------------------------------
-        // Route polyline
-        // ---------------------------------------------------------------
+        /// Route polyline
         const RouteLayer(),
 
-        // ---------------------------------------------------------------
-        // Location + destination markers
-        // ---------------------------------------------------------------
+        /// Location + destination markers
         Obx(() {
           final markers = <Marker>[];
 
-          // Current location — blue pulsing dot style
+          /// Current location
           final loc = _navController.currentLocation.value;
           if (loc != null) {
             markers.add(
@@ -120,7 +99,7 @@ class _MapViewState extends State<MapView> {
             );
           }
 
-          // Destination pin
+          /// Destination pin
           final dest = _navController.destination.value;
           if (dest != null) {
             markers.add(
@@ -141,23 +120,17 @@ class _MapViewState extends State<MapView> {
           return MarkerLayer(markers: markers);
         }),
 
-        // ---------------------------------------------------------------
-        // Animated car
-        // ---------------------------------------------------------------
+        /// Animated car
         const CarMarker(),
 
-        // ---------------------------------------------------------------
-        // OSM attribution — required by OSM tile usage policy
-        // ---------------------------------------------------------------
+        /// OSM attribution — required by OSM tile usage policy
         const RichAttributionWidget(
           attributions: [
             TextSourceAttribution('© OpenStreetMap contributors'),
           ],
         ),
 
-        // ---------------------------------------------------------------
-        // Long-press hint — shown until the first destination is set
-        // ---------------------------------------------------------------
+        /// Long-press hint — shown until the first destination is set
         Obx(() {
           final hasDest = _navController.destination.value != null;
           final hasLocation = _navController.currentLocation.value != null;

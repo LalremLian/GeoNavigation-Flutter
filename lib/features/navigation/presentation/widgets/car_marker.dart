@@ -7,15 +7,6 @@ import 'package:get/get.dart';
 import '../../domain/entities/navigation_state.dart';
 import '../controllers/navigation_controller.dart';
 
-/// Renders the animated car icon on the map.
-///
-/// Reads [NavigationController.engineState] and rotates/positions the icon
-/// according to bearing and position. No navigation mathematics lives here —
-/// all computation is done in [NavigationEngine].
-///
-/// The car is shown:
-///   - At the route start point once a route is ready (before Start is pressed)
-///   - While navigating, paused, or completed
 class CarMarker extends StatelessWidget {
   const CarMarker({super.key});
 
@@ -49,11 +40,8 @@ class CarMarker extends StatelessWidget {
   }
 }
 
-/// Car pointer using the top-down [car_icon.png] asset.
-///
+/// Car pointer
 /// Rotated by [bearingDegrees] so it points in the direction of travel.
-/// [Transform.rotate] uses radians, clockwise positive, matching
-/// the 0°=north / 90°=east bearing convention.
 class _CarIcon extends StatelessWidget {
   const _CarIcon({required this.bearingDegrees});
 

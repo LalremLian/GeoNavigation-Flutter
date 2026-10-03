@@ -6,18 +6,6 @@ import '../../../../core/constants/channel_constants.dart';
 import '../../../../core/errors/location_errors.dart';
 import '../../domain/entities/location_data.dart';
 
-/// Low-level bridge between Dart and the native Android location channels.
-///
-/// This is the ONLY class in the codebase that directly references
-/// [MethodChannel] or [EventChannel] for location data.
-/// Every call above this layer goes through [LocationService].
-///
-/// Platform contract (must match LocationChannel.kt exactly):
-///   MethodChannel : com.example.navtest/location
-///   EventChannel  : com.example.navtest/location_stream
-///
-/// On unsupported platforms (iOS not yet implemented, web, desktop)
-/// every method returns a [LocationNotSupported] error rather than crashing.
 class LocationChannelService {
   LocationChannelService()
       : _methodChannel = const MethodChannel(ChannelConstants.locationMethod),
@@ -26,14 +14,7 @@ class LocationChannelService {
   final MethodChannel _methodChannel;
   final EventChannel _eventChannel;
 
-  // ---------------------------------------------------------------------------
-  // Permission
-  // ---------------------------------------------------------------------------
-
-  /// Triggers the OS permission dialog for ACCESS_FINE_LOCATION.
-  ///
-  /// Completes normally if granted.
-  /// Throws [LocationPermissionDenied] or [LocationPermissionPermanentlyDenied].
+  /// Triggers the permission dialog for ACCESS_FINE_LOCATION.
   Future<void> requestPermission() async {
     try {
       await _methodChannel.invokeMethod<String>('requestPermission');
@@ -70,13 +51,7 @@ class LocationChannelService {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Single fix
-  // ---------------------------------------------------------------------------
-
   /// Requests a fresh location fix from the native side.
-  ///
-  /// Throws a typed [AppError] on any failure.
   Future<LocationData> getCurrentLocation() async {
     try {
       final raw = await _methodChannel
@@ -90,12 +65,7 @@ class LocationChannelService {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Settings
-  // ---------------------------------------------------------------------------
-
-  /// Opens the system app-settings screen so the user can re-enable
-  /// a permanently-denied permission.
+  /// Opens the system app-settings screen so the user can re-enable a permanently-denied permission.
   Future<void> openAppSettings() async {
     try {
       await _methodChannel.invokeMethod<void>('openAppSettings');
@@ -117,17 +87,7 @@ class LocationChannelService {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Continuous stream
-  // ---------------------------------------------------------------------------
-
   /// Returns a broadcast stream of location updates.
-  ///
-  /// The native side starts [FusedLocationProviderClient] updates when the
-  /// first subscriber listens and stops them when the subscription is cancelled.
-  ///
-  /// Emits typed [AppError] subclasses via [addError] on failure — callers
-  /// can distinguish them with an `onError` handler or `.handleError()`.
   Stream<LocationData> locationStream() {
     return _eventChannel
         .receiveBroadcastStream()
@@ -145,19 +105,11 @@ class LocationChannelService {
         });
   }
 
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
-
   /// Converts a raw channel map into a [LocationData] value object.
-  ///
-  /// Exposed as a static method so it can be used in unit tests without
-  /// spinning up a real channel.
   static LocationData mapToLocationData(Map<Object?, Object?> raw) =>
       _mapToLocationData(raw);
 
   static LocationData _mapToLocationData(Map<Object?, Object?> raw) {
-    // Guard against unexpected null values from the native side
     final lat = (raw['lat'] as num?)?.toDouble();
     final lng = (raw['lng'] as num?)?.toDouble();
 

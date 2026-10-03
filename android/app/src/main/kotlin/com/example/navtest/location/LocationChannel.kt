@@ -10,26 +10,10 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
-// Channel name constants — must match channel_constants.dart exactly
 private const val METHOD_CHANNEL_NAME  = "com.example.navtest/location"
 private const val EVENT_CHANNEL_NAME   = "com.example.navtest/location_stream"
-
-// Request code used when asking MainActivity to trigger the permission dialog
 const val LOCATION_PERMISSION_REQUEST_CODE = 1001
 
-/**
- * Registers and handles the MethodChannel + EventChannel for location.
- *
- * Design:
- *  - [MethodChannel] handles one-shot commands (permission, single fix, settings)
- *  - [EventChannel] streams continuous location fixes to Dart
- *  - [LocationManager] owns all FusedLocation logic — this class only routes calls
- *
- * Lifecycle:
- *  - Call [register] from MainActivity.configureFlutterEngine
- *  - Call [onPermissionResult] from MainActivity.onRequestPermissionsResult
- *  - Call [dispose] from MainActivity.onDestroy
- */
 class LocationChannel(
     private val locationManager: LocationManager,
     private val getActivity: () -> Activity?
@@ -43,10 +27,6 @@ class LocationChannel(
 
     // EventChannel sink — non-null while Dart has an active stream subscription
     private var eventSink: EventChannel.EventSink? = null
-
-    // -----------------------------------------------------------------------
-    // Registration
-    // -----------------------------------------------------------------------
 
     fun register(flutterEngine: FlutterEngine) {
         // --- MethodChannel ---------------------------------------------------
@@ -88,8 +68,6 @@ class LocationChannel(
 
     private fun handleMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-
-            // -----------------------------------------------------------------
             "requestPermission" -> {
                 val activity = getActivity() ?: run {
                     result.error(ErrorCodes.NOT_SUPPORTED, "No activity available", null)
@@ -114,40 +92,29 @@ class LocationChannel(
                 )
             }
 
-            // -----------------------------------------------------------------
             "checkPermission" -> {
                 result.success(if (locationManager.hasPermission()) "granted" else "denied")
             }
-
-            // -----------------------------------------------------------------
             "isLocationServiceEnabled" -> {
                 result.success(locationManager.isLocationServiceEnabled())
             }
-
-            // -----------------------------------------------------------------
             "getCurrentLocation" -> {
                 locationManager.getCurrentLocation(
                     onSuccess = { map -> result.success(map) },
                     onError   = { code -> result.error(code, code, null) }
                 )
             }
-
-            // -----------------------------------------------------------------
             "getLastKnownLocation" -> {
                 locationManager.getLastKnownLocation(
                     onSuccess = { map -> result.success(map) },
                     onError   = { code -> result.error(code, code, null) }
                 )
             }
-
-            // -----------------------------------------------------------------
             "stopLocationUpdates" -> {
                 locationManager.stopLocationUpdates()
                 eventSink = null
                 result.success(null)
             }
-
-            // -----------------------------------------------------------------
             "openAppSettings" -> {
                 val activity = getActivity() ?: run {
                     result.error(ErrorCodes.NOT_SUPPORTED, "No activity", null)
@@ -160,8 +127,6 @@ class LocationChannel(
                 activity.startActivity(intent)
                 result.success(null)
             }
-
-            // -----------------------------------------------------------------
             "openLocationSettings" -> {
                 val activity = getActivity() ?: run {
                     result.error(ErrorCodes.NOT_SUPPORTED, "No activity", null)
@@ -173,20 +138,10 @@ class LocationChannel(
                 activity.startActivity(intent)
                 result.success(null)
             }
-
-            // -----------------------------------------------------------------
             else -> result.notImplemented()
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Permission result callback
-    // -----------------------------------------------------------------------
-
-    /**
-     * Must be called from [MainActivity.onRequestPermissionsResult].
-     * Returns true if this class handled the request code.
-     */
     fun onPermissionResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -230,14 +185,6 @@ class LocationChannel(
         return true
     }
 
-    // -----------------------------------------------------------------------
-    // Lifecycle
-    // -----------------------------------------------------------------------
-
-    /**
-     * Stops all native listeners and clears channel handlers.
-     * Call from MainActivity.onDestroy.
-     */
     fun dispose() {
         locationManager.stopLocationUpdates()
         eventSink?.endOfStream()

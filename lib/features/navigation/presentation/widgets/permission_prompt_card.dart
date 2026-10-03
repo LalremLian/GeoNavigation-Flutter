@@ -3,11 +3,6 @@ import 'package:get/get.dart';
 
 import '../controllers/navigation_controller.dart';
 
-/// Contextual card explaining why location access is needed before
-/// prompting the OS permission dialog.
-///
-/// Complies with: "Request location permission at an appropriate moment,
-/// not immediately on app launch before the user has any context."
 class PermissionPromptCard extends StatelessWidget {
   const PermissionPromptCard({super.key});
 

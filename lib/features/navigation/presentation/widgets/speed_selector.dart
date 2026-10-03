@@ -3,7 +3,6 @@ import 'package:get/get.dart';
 
 import '../controllers/navigation_controller.dart';
 
-/// 1x / 2x / 5x speed multiplier toggle.
 class SpeedSelector extends StatelessWidget {
   const SpeedSelector({super.key});
 

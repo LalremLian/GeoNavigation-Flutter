@@ -4,9 +4,6 @@ import 'package:get/get.dart';
 
 import '../controllers/navigation_controller.dart';
 
-/// Draws the decoded route polyline on the map.
-///
-/// Stateless — re-renders whenever [NavigationController.route] changes.
 class RouteLayer extends StatelessWidget {
   const RouteLayer({super.key});
 
@@ -22,7 +19,7 @@ class RouteLayer extends StatelessWidget {
 
       return PolylineLayer(
         polylines: [
-          // 1. Full/uncovered route (vibrant navigation blue)
+          /// Full/uncovered route (vibrant navigation blue)
           Polyline(
             points: r.points,
             strokeWidth: 6,
@@ -31,7 +28,7 @@ class RouteLayer extends StatelessWidget {
             strokeJoin: StrokeJoin.round,
           ),
 
-          // 2. Covered/traveled route segment (light grey so user can see progress)
+          /// Covered/traveled route segment (light grey so user can see progress)
           if (covered.length >= 2)
             Polyline(
               points: covered,

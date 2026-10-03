@@ -2,9 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/config/app_config.dart';
 
-/// Renders a visible "DEV" badge in the top-right corner.
-///
-/// Renders nothing in the prod flavor — zero cost at runtime.
 class DevBanner extends StatelessWidget {
   const DevBanner({super.key});
 

@@ -12,61 +12,28 @@ import androidx.core.content.ContextCompat
 import com.google.android.gms.location.*
 import com.google.android.gms.tasks.CancellationTokenSource
 
-/**
- * Wraps [FusedLocationProviderClient] with a clean API for the channel layer.
- *
- * Responsibilities:
- *  - Permission checks (does NOT request — that is handled by MainActivity)
- *  - Single location fix with timeout via getCurrentLocation()
- *  - Continuous location updates via startLocationUpdates() / stopLocationUpdates()
- *  - Location service (GPS) enabled check
- *  - Real-time provider changes monitoring via BroadcastReceiver
- *
- * All callbacks fire on the main thread. The channel layer converts results
- * to Flutter-compatible maps before forwarding to Dart.
- */
 class LocationManager(private val context: Context) {
 
-    private val fusedClient: FusedLocationProviderClient =
-        LocationServices.getFusedLocationProviderClient(context)
-
-    // Holds the active stream callback so we can remove it cleanly.
+    private val fusedClient: FusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(context)
     private var streamCallback: LocationCallback? = null
-
-    // BroadcastReceiver for provider status (GPS toggle) changes
     private var providerChangedReceiver: BroadcastReceiver? = null
-
-    // CancellationTokenSource for the one-shot getCurrentLocation request.
     private var currentLocationCts: CancellationTokenSource? = null
 
-    // -----------------------------------------------------------------------
-    // Permission helpers
-    // -----------------------------------------------------------------------
-
-    /** Returns true if ACCESS_FINE_LOCATION is currently granted. */
+    //Permission already granted or not
     fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
-    /** Returns true if the system location provider (GPS or network) is enabled. */
+    //Detect locations toggles
     fun isLocationServiceEnabled(): Boolean {
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as SystemLocationManager
         return lm.isProviderEnabled(SystemLocationManager.GPS_PROVIDER) ||
                 lm.isProviderEnabled(SystemLocationManager.NETWORK_PROVIDER)
     }
 
-    // -----------------------------------------------------------------------
-    // Single fix
-    // -----------------------------------------------------------------------
 
-    /**
-     * Requests a single fresh location fix.
-     *
-     * @param onSuccess called with a [LocationMap] on success
-     * @param onError   called with an error code string on failure
-     */
     fun getCurrentLocation(
         onSuccess: (LocationMap) -> Unit,
         onError: (String) -> Unit
@@ -91,7 +58,6 @@ class LocationManager(private val context: Context) {
                 if (location != null) {
                     onSuccess(location.toMap())
                 } else {
-                    // Fused returned null — try last known as fallback
                     getLastKnownLocation(
                         onSuccess = onSuccess,
                         onError = { onError(ErrorCodes.LOCATION_UNAVAILABLE) }
@@ -106,10 +72,7 @@ class LocationManager(private val context: Context) {
             }
     }
 
-    /**
-     * Returns the last known location without forcing a new fix.
-     * Faster but may be stale or null.
-     */
+    /** Returns the last known location without forcing a new fix. Faster but may be stale or null. */
     fun getLastKnownLocation(
         onSuccess: (LocationMap) -> Unit,
         onError: (String) -> Unit
@@ -132,16 +95,7 @@ class LocationManager(private val context: Context) {
             }
     }
 
-    // -----------------------------------------------------------------------
-    // Continuous updates
-    // -----------------------------------------------------------------------
-
-    /**
-     * Starts streaming location updates.
-     *
-     * Fires [onLocation] for each new fix and [onError] on failure.
-     * Calling this while already streaming replaces the previous callback.
-     */
+    /** Starts streaming location updates. */
     fun startLocationUpdates(
         onLocation: (LocationMap) -> Unit,
         onError: (String) -> Unit
@@ -226,10 +180,6 @@ class LocationManager(private val context: Context) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Type alias + extension helpers
-// ---------------------------------------------------------------------------
-
 /** The shape sent over the EventChannel / MethodChannel to Dart. */
 typealias LocationMap = Map<String, Any?>
 
@@ -242,10 +192,6 @@ private fun android.location.Location.toMap(): LocationMap = mapOf(
     "bearing"   to bearing.toDouble(),
     "timestamp" to time          // epoch milliseconds
 )
-
-// ---------------------------------------------------------------------------
-// Error code constants
-// ---------------------------------------------------------------------------
 
 object ErrorCodes {
     const val PERMISSION_DENIED              = "PERMISSION_DENIED"

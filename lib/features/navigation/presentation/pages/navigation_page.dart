@@ -12,10 +12,6 @@ import '../widgets/map_view.dart';
 import '../widgets/permission_prompt_card.dart';
 import '../widgets/recenter_button.dart';
 
-/// The single application screen.
-///
-/// Hosts the map, overlaid controls, error states and loading indicator.
-/// All business logic is delegated to [NavigationController].
 class NavigationPage extends StatefulWidget {
   const NavigationPage({super.key});
 
@@ -31,7 +27,6 @@ class _NavigationPageState extends State<NavigationPage>
   void initState() {
     super.initState();
     _controller = Get.find<NavigationController>();
-    // Provide the TickerProvider so the controller can drive car animation
     _controller.initTicker(this);
   }
 
@@ -40,44 +35,32 @@ class _NavigationPageState extends State<NavigationPage>
     return Scaffold(
       body: Stack(
         children: [
-          // -------------------------------------------------------------------
-          // Full-screen map (always rendered behind everything)
-          // -------------------------------------------------------------------
+          /// Full-screen map (always rendered behind everything)
           const MapView(),
 
-          // -------------------------------------------------------------------
-          // DEV flavor badge — renders nothing in prod
-          // -------------------------------------------------------------------
+          /// DEV flavor badge — renders nothing in prod
           const DevBanner(),
 
-          // -------------------------------------------------------------------
-          // Contextual Permission Prompt Card (shown when permission needed)
-          // -------------------------------------------------------------------
+          /// Contextual Permission Prompt Card (shown when permission needed)
           const Align(
             alignment: Alignment.topCenter,
             child: PermissionPromptCard(),
           ),
 
-          // -------------------------------------------------------------------
-          // Error overlay — shown when controller.error != null
-          // -------------------------------------------------------------------
+          /// Error overlay — shown when controller.error != null
           const Align(
             alignment: Alignment.topCenter,
             child: ErrorOverlay(),
           ),
 
-          // -------------------------------------------------------------------
-          // Distance / duration info panel
-          // -------------------------------------------------------------------
+          /// Distance / duration info panel
           const Positioned(
             left: 0,
             bottom: 145,
             child: InfoPanel(),
           ),
 
-          // -------------------------------------------------------------------
-          // Location loading indicator
-          // -------------------------------------------------------------------
+          /// Location loading indicator
           Obx(() {
             final loading = _controller.navStatus.value ==
                 NavigationStatus.loadingLocation;
@@ -92,9 +75,7 @@ class _NavigationPageState extends State<NavigationPage>
             );
           }),
 
-          // -------------------------------------------------------------------
-          // Route loading indicator
-          // -------------------------------------------------------------------
+          /// Route loading indicator
           Obx(() {
             final loading = _controller.navStatus.value ==
                 NavigationStatus.loadingRoute;
@@ -109,9 +90,7 @@ class _NavigationPageState extends State<NavigationPage>
             );
           }),
 
-          // -------------------------------------------------------------------
-          // Start / Pause / Resume / Reset + speed controls
-          // -------------------------------------------------------------------
+          /// Speed controls
           Obx(() {
             if (_controller.route.value == null) {
               return const SizedBox.shrink();
@@ -123,17 +102,13 @@ class _NavigationPageState extends State<NavigationPage>
             );
           }),
 
-          // -------------------------------------------------------------------
-          // Recenter button — visible only after manual map pan
-          // -------------------------------------------------------------------
+          /// Recenter button — visible only after manual map pan
           const Align(
             alignment: Alignment.bottomRight,
             child: RecenterButton(),
           ),
 
-          // -------------------------------------------------------------------
-          // Arrival Dialog — shown when car reaches destination
-          // -------------------------------------------------------------------
+          /// Arrival Dialog — shown when car reaches destination
           const ArrivalDialog(),
         ],
       ),

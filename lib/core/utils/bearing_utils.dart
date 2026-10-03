@@ -1,8 +1,6 @@
 import 'dart:math' as math;
 
 /// Pure bearing/angle utilities.
-///
-/// No Flutter, GetX or map dependencies — safe to use in unit tests.
 abstract final class BearingUtils {
   /// Calculates the initial bearing (forward azimuth) in degrees [0, 360)
   /// from point [fromLat]/[fromLng] to point [toLat]/[toLng].
@@ -27,10 +25,6 @@ abstract final class BearingUtils {
   }
 
   /// Returns the shortest angular difference to rotate [from] to [to].
-  ///
-  /// Result is always in [-180, 180].
-  /// Example: from=359°, to=1°  → +2° (not −358°)
-  ///          from=1°,   to=359° → −2° (not +358°)
   static double shortestDelta(double from, double to) {
     double delta = (to - from) % 360;
     if (delta > 180) delta -= 360;
@@ -42,8 +36,6 @@ abstract final class BearingUtils {
   static double normalise(double degrees) => (degrees % 360 + 360) % 360;
 
   /// Linearly interpolates bearing using the shortest angular path.
-  ///
-  /// [t] must be in [0, 1].
   static double interpolate(double from, double to, double t) {
     return normalise(from + shortestDelta(from, to) * t);
   }

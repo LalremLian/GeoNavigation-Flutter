@@ -7,10 +7,6 @@ import 'package:http/http.dart' as http;
 import '../../../../core/errors/routing_errors.dart';
 import '../models/osrm_response.dart';
 
-/// Makes raw HTTP calls to the OSRM routing API.
-///
-/// Knows about HTTP and JSON only — no business logic.
-/// [RoutingRepository] calls this and converts the response to a [RouteModel].
 class OsrmService {
   OsrmService({
     required this.baseUrl,
@@ -23,14 +19,6 @@ class OsrmService {
   static const Duration _timeout = Duration(seconds: 10);
 
   /// Fetches a driving route between origin and destination.
-  ///
-  /// OSRM uses GeoJSON coordinate order: longitude, latitude.
-  ///
-  /// Throws typed [AppError] subclasses on failure:
-  ///   - [RoutingNetworkError] — socket / DNS failure
-  ///   - [RoutingTimeout]      — response took > 10 s
-  ///   - [RoutingParseError]   — malformed JSON
-  ///   - [NoRouteFound]        — empty routes array or non-Ok code
   Future<OsrmResponse> fetchRoute({
     required double originLat,
     required double originLng,
@@ -78,7 +66,6 @@ class OsrmService {
   }
 
   /// Builds the OSRM route URL.
-  /// Visible for testing — no HTTP side effects.
   Uri buildRouteUri({
     required double originLat,
     required double originLng,

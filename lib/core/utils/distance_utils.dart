@@ -1,8 +1,6 @@
 import 'dart:math' as math;
 
 /// Haversine distance calculations.
-///
-/// No Flutter/GetX dependencies — safe for pure Dart unit tests.
 abstract final class DistanceUtils {
   static const double _earthRadiusMeters = 6371000.0;
 
